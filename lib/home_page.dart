@@ -530,6 +530,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     _update(() {
       _group = g;
       _page = 1;
+      _gridFocusIndex = 0; // 切换分组后焦点回到第一个格子
       _poke();
     });
     _savePrefs();
@@ -553,6 +554,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     _update(() {
       _quality = q;
       _page = 1;
+      _gridFocusIndex = 0; // 切换码流后焦点回到第一个格子
       _poke();
     });
     _savePrefs();
@@ -799,7 +801,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     if (k == LogicalKeyboardKey.contextMenu ||
         event.logicalKey.keyId == 0x0010000d ||
         event.logicalKey.keyId == 0xFFFFFF05) {
-
+      if (event is KeyRepeatEvent) return true; // 长按菜单只切换一次
       if (isRoot) _togglePanel();
       return true;
     }
@@ -825,6 +827,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       if (k == LogicalKeyboardKey.select ||
           k == LogicalKeyboardKey.enter ||
           k == LogicalKeyboardKey.space) {
+        if (event is KeyRepeatEvent) return true; // 长按 OK 只激活一次
         _panelKey.currentState?.activateFocus();
         return true;
       }
@@ -867,6 +870,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     if (k == LogicalKeyboardKey.select ||
         k == LogicalKeyboardKey.enter ||
         k == LogicalKeyboardKey.space) {
+      if (event is KeyRepeatEvent) return true; // 长按 OK 只进一次全屏
       if (_gridFocusIndex < n) _openFullscreen(_pageChannels[_gridFocusIndex]);
       return true;
     }
@@ -2366,6 +2370,9 @@ class _PanelBodyState extends State<_PanelBody> {
       key: _btnKeys[idx],
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(6),
+      // 焦点统一走自绘 _focusIndex：禁止 InkWell 进入 Flutter 真实焦点树，
+      // 避免鼠标/触屏点击后出现第二套焦点框（canRequestFocus 不影响点击）
+      canRequestFocus: false,
       focusColor: Colors.lightBlueAccent.withValues(alpha: .22),
       onFocusChange: (v) => setState(() {}),
       child: Container(
