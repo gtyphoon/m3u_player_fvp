@@ -14,6 +14,13 @@ import 'm3u_parser.dart';
 /// 布局档位：格子数
 const List<int> kLayouts = [1, 2, 4, 5, 6, 7, 8, 16];
 
+// ---------- 应用信息（关于弹窗展示，需与 pubspec.yaml 保持一致） ----------
+const String kAppName = 'M3U播放器';
+const String kAppVersion = '4.0.0';
+const String kAppBuild = '12';
+const String kAppAuthor = 'gtyphoon';
+const String kAppLicense = 'MIT License';
+
 /// 面板形态：auto=自动适配（竖屏底部/宽屏左侧），left=强制左侧抽屉，bottom=强制底部
 enum PanelStyle { auto, left, bottom }
 
@@ -1755,6 +1762,75 @@ Widget _helpSection(String title, List<String> lines) {
   );
 }
 
+/// 关于弹窗：版本信息 + 组件架构构成 + 作者
+Future<void> showAppAboutDialog(BuildContext context) {
+  return showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Colors.blueGrey.shade900,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      title: const Text('关于',
+          style: TextStyle(color: Colors.white, fontSize: 16)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _aboutRow('应用名称', kAppName),
+            _aboutRow('版本', '$kAppVersion（build $kAppBuild）'),
+            _aboutRow('作者', kAppAuthor),
+            _aboutRow('许可', kAppLicense),
+            const SizedBox(height: 10),
+            const Text('组件架构构成',
+                style: TextStyle(
+                    color: Colors.lightBlueAccent,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            for (final l in const [
+              'Flutter 3.47.4 / Dart 3.13.3（UI 框架）',
+              'fvp 0.38.1（MDK 多媒体内核）',
+              'FFmpeg（HEVC-in-FLV / H.264 硬解与软解）',
+              '平台：Android（arm64-v8a / armeabi-v7a / x86_64）',
+              '平台：Windows（x64 桌面版）',
+            ])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text('· $l',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 13)),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('知道了',
+              style: TextStyle(color: Colors.lightBlueAccent, fontSize: 15)),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _aboutRow(String key, String value) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('$key：',
+            style: const TextStyle(color: Colors.white54, fontSize: 13)),
+        Expanded(
+          child: Text(value,
+              style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        ),
+      ],
+    ),
+  );
+}
+
 /// 底部分组条：单行横向滑动，点击后自动滚动保持选中项可见
 class _GroupBar extends StatefulWidget {
   final List<String> groups;
@@ -2218,6 +2294,10 @@ class _PanelBodyState extends State<_PanelBody> {
                 Center(
                   child: _btn('操作说明', false,
                       () => showHelpDialog(context)),
+                ),
+                const SizedBox(height: 10),
+                Center(
+                  child: _btn('关于', false, () => showAppAboutDialog(context)),
                 ),
                 const SizedBox(height: 10),
                 const SizedBox(height: 10),

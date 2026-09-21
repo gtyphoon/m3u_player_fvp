@@ -31,10 +31,9 @@ android {
         // 手机版 minSdk 24（video_player/fvp 要求）
         minSdk = 24
         targetSdk = 34
-        ndk {
-            // 手机版只保留 arm64-v8a，大幅缩小 APK 体积
-            abiFilters.addAll(listOf("arm64-v8a"))
-        }
+        // 注意：不写 ndk.abiFilters。使用 --split-per-abi 构建时由 Gradle splits
+        // 自动按 fvp 支持的 ABI 拆分（arm64-v8a / armeabi-v7a / x86_64 等），
+        // 显式 abiFilters 会与 splits 冲突导致构建失败。
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
