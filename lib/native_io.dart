@@ -95,8 +95,9 @@ class NativeIO {
     return value == null ? null : value == 'true';
   }
 
-  /// Windows：一次性写入整个 config.ini（单个键也走这里）。
-  /// 整文件单次写，避免"读-改-写"并发互相覆盖导致配置丢失。
+  /// Windows：合并写入 config.ini（整文件单次写回）。
+  /// 读现有配置 → 更新本次键值 → 整体写回，保证单键写入（如 guide_shown）
+  /// 不会覆盖掉其他配置项；串行锁保证并发"读-改-写"不互相覆盖。
   static Future<void> prefsSetBatch(Map<String, String> config) async {
     if (Platform.isWindows) {
       final prev = _winWriteLock;
@@ -106,8 +107,19 @@ class NativeIO {
       try {
         final dir = await getAppDir();
         final file = File('$dir/config.ini');
+        final merged = <String, String>{};
+        if (await file.exists()) {
+          final lines = await file.readAsLines();
+          for (final line in lines) {
+            final idx = line.indexOf('=');
+            if (idx > 0) {
+              merged[line.substring(0, idx)] = line.substring(idx + 1);
+            }
+          }
+        }
+        merged.addAll(config);
         await file.writeAsString(
-            config.entries.map((e) => '${e.key}=${e.value}').join('\n'));
+            merged.entries.map((e) => '${e.key}=${e.value}').join('\n'));
       } finally {
         completer.complete();
       }
