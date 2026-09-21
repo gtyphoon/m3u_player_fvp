@@ -14,6 +14,10 @@ migrate_working_dir/
 # 一次性调试/修复脚本与运行期数据（不入库）
 fix_windows*.py
 config.ini
+# 本地频道列表（含内网监控地址，防止误提交泄露）
+*.m3u
+*.m3u8
+my_channels.m3u
 
 # IntelliJ related
 *.iml
