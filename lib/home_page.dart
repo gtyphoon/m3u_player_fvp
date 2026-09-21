@@ -293,7 +293,12 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     }
   }
 
+  bool _importingM3U = false; // 防重入：空态连按方向键/OK 只弹一次选择器
+
   Future<void> _importM3U() async {
+    if (_importingM3U) return;
+    _importingM3U = true;
+    try {
     // 手机/平板：用系统文件选择器（选完自动关闭，无权限问题）
     if (!_tvEffective) {
       String? content;
@@ -369,6 +374,9 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       _applyM3U(content, picked.split('/').last);
     } catch (e) {
       _showTip('读取文件失败: $e');
+    }
+    } finally {
+      _importingM3U = false;
     }
   }
 
@@ -485,7 +493,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   void _changeLayout(int n) {
     _update(() {
-      _layout = n;
+      _layout = n.clamp(1, 16).toInt();
       _page = 1;
       _poke();
     });
@@ -494,7 +502,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   void _changeColumns(int c) {
     _update(() {
-      _columns = c;
+      _columns = c.clamp(0, 4).toInt();
       _page = 1;
       _poke();
     });
@@ -503,7 +511,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   void _changeRows(int r) {
     _update(() {
-      _rows = r;
+      _rows = r.clamp(0, 4).toInt();
       _page = 1;
       _poke();
     });
@@ -512,7 +520,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   void _changePreload(int n) {
     _update(() {
-      _preload = n;
+      _preload = n.clamp(0, 8).toInt();
       _poke();
     });
     _savePrefs();
@@ -576,22 +584,22 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   }
 
   void _changeFirstFrameTimeout(int v) {
-    setState(() => _firstFrameTimeout = v);
+    setState(() => _firstFrameTimeout = v.clamp(1, 60).toInt());
     _savePrefs();
   }
 
   void _changeHeartbeatTimeout(int v) {
-    setState(() => _heartbeatTimeout = v);
+    setState(() => _heartbeatTimeout = v.clamp(1, 60).toInt());
     _savePrefs();
   }
 
   void _changeBufferSeconds(int v) {
-    setState(() => _bufferSeconds = v);
+    setState(() => _bufferSeconds = v.clamp(0, 10).toInt());
     _savePrefs();
   }
 
   void _changeReconnectDelayMax(int v) {
-    setState(() => _reconnectDelayMax = v);
+    setState(() => _reconnectDelayMax = v.clamp(1, 30).toInt());
     _savePrefs();
   }
 
@@ -804,9 +812,14 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     // 面板开着：方向键移动高亮、OK 激活
     if (_panelOpen) {
       if (k == LogicalKeyboardKey.arrowUp ||
-          k == LogicalKeyboardKey.arrowDown) {
+          k == LogicalKeyboardKey.arrowDown ||
+          k == LogicalKeyboardKey.arrowLeft ||
+          k == LogicalKeyboardKey.arrowRight) {
         _panelKey.currentState
-            ?.moveFocus(k == LogicalKeyboardKey.arrowDown ? 1 : -1);
+            ?.moveFocus((k == LogicalKeyboardKey.arrowDown ||
+                    k == LogicalKeyboardKey.arrowRight)
+                ? 1
+                : -1);
         return true;
       }
       if (k == LogicalKeyboardKey.select ||
@@ -2066,6 +2079,7 @@ class _PanelBodyState extends State<_PanelBody> {
   @override
   Widget build(BuildContext context) {
     _actions.clear();
+    _btnKeys.clear();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2325,7 +2339,8 @@ class _PanelBodyState extends State<_PanelBody> {
       ValueChanged<int> onChanged) {
     return Row(
       children: [
-        _btn('−', value > min, () => onChanged(value - 1)),
+        _btn('−', false, () => onChanged(value - 1),
+            enabled: value > min),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
@@ -2335,35 +2350,41 @@ class _PanelBodyState extends State<_PanelBody> {
           ),
         ),
         const SizedBox(width: 8),
-        _btn('＋', value < max, () => onChanged(value + 1)),
+        _btn('＋', false, () => onChanged(value + 1),
+            enabled: value < max),
       ],
     );
   }
 
-  Widget _btn(String label, bool selected, VoidCallback onTap) {
+  Widget _btn(String label, bool selected, VoidCallback onTap,
+      {bool enabled = true}) {
     final idx = _actions.length;
-    _actions.add(onTap);
+    _actions.add(enabled ? onTap : () {});
     while (_btnKeys.length <= idx) _btnKeys.add(GlobalKey());
     final focused = idx == _focusIndex;
     return InkWell(
       key: _btnKeys[idx],
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(6),
       focusColor: Colors.lightBlueAccent.withValues(alpha: .22),
       onFocusChange: (v) => setState(() {}),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          color: selected
-              ? Colors.lightBlueAccent.withValues(alpha: .35)
-              : Colors.white10,
+          color: !enabled
+              ? Colors.transparent
+              : selected
+                  ? Colors.lightBlueAccent.withValues(alpha: .35)
+                  : Colors.white10,
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color: focused
                 ? Colors.amber
-                : selected
-                    ? Colors.lightBlueAccent
-                    : Colors.white24,
+                : !enabled
+                    ? Colors.white10
+                    : selected
+                        ? Colors.lightBlueAccent
+                        : Colors.white24,
             width: focused ? 2.5 : 1,
           ),
         ),
@@ -2371,7 +2392,11 @@ class _PanelBodyState extends State<_PanelBody> {
           label,
           style: TextStyle(
             fontSize: 13,
-            color: selected ? Colors.lightBlueAccent.shade100 : Colors.white70,
+            color: !enabled
+                ? Colors.white24
+                : selected
+                    ? Colors.lightBlueAccent.shade100
+                    : Colors.white70,
             fontWeight: selected ? FontWeight.bold : FontWeight.normal,
           ),
         ),
