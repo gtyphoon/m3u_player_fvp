@@ -2083,7 +2083,6 @@ class _PanelBodyState extends State<_PanelBody> {
   @override
   Widget build(BuildContext context) {
     _actions.clear();
-    _btnKeys.clear();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2370,9 +2369,6 @@ class _PanelBodyState extends State<_PanelBody> {
       key: _btnKeys[idx],
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(6),
-      // 焦点统一走自绘 _focusIndex：禁止 InkWell 进入 Flutter 真实焦点树，
-      // 避免鼠标/触屏点击后出现第二套焦点框（canRequestFocus 不影响点击）
-      canRequestFocus: false,
       focusColor: Colors.lightBlueAccent.withValues(alpha: .22),
       onFocusChange: (v) => setState(() {}),
       child: Container(
