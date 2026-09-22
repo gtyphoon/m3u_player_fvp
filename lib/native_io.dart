@@ -19,38 +19,14 @@ class NativeIO {
 
   /// 应用文档目录绝对路径（内部存储，无需任何权限）
   ///
-  /// Windows：使用软件 exe 本身所在目录（config.ini / my_channels.m3u 与
-  /// 程序放在一起）。首次运行时把旧版本存在"工作目录"或
-  /// %APPDATA%\m3u_player_fvp 下的文件一次性迁移过来，避免配置"丢失"。
+  /// Windows：使用软件 exe 本身所在目录，config.ini / my_channels.m3u
+  /// 与程序放在一起（跟随文件夹整体移动/备份，不做任何"自动迁移"——
+  /// 自动迁移会意外带上本机旧位置的配置或频道清单）。
   static Future<String> getAppDir() async {
     if (Platform.isWindows) {
-      final exeDir = File(Platform.resolvedExecutable).parent.path;
-      await _migrateLegacyFiles(exeDir);
-      return exeDir;
+      return File(Platform.resolvedExecutable).parent.path;
     }
     return (await _ch.invokeMethod<String>('getAppDir')) ?? '/';
-  }
-
-  /// 一次性迁移旧版本的文件到 exe 所在目录（仅当新位置不存在时复制）
-  static Future<void> _migrateLegacyFiles(String exeDir) async {
-    final appData = Platform.environment['APPDATA'];
-    final oldDirs = <String>[
-      if (appData != null && appData.isNotEmpty) '$appData\\m3u_player_fvp',
-      Directory.current.path,
-    ];
-    for (final name in const ['config.ini', 'my_channels.m3u']) {
-      final newFile = File('$exeDir\\$name');
-      if (await newFile.exists()) continue;
-      for (final oldDir in oldDirs) {
-        if (oldDir == exeDir) continue;
-        final oldFile = File('$oldDir\\$name');
-        if (!await oldFile.exists()) continue;
-        try {
-          await oldFile.copy(newFile.path);
-          break;
-        } catch (_) {}
-      }
-    }
   }
 
   /// 系统文件选择器选 M3U/M3U8/TXT，返回文件文本内容；取消返回 null

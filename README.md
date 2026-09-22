@@ -68,7 +68,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 | Android 手机 / 电视盒（64 位，2017 年以后的大多数设备） | `app-arm64-v8a-release.apk` | 复制到手机/电视盒，点击安装（需允许"安装未知来源应用"） |
 | Android 老设备（32 位） | `app-armeabi-v7a-release.apk` | 同上 |
 | Android 模拟器 / 特殊 x86 设备 | `app-x86_64-release.apk` | 同上 |
-| Windows 电脑（64 位） | `m3u_player_fvp-windows.zip` | 解压到电脑任意目录（建议 `D:\m3u_player`），双击里面的 exe 即可运行 |
+| Windows 电脑（64 位） | `m3u_player-windows.zip` | 解压到电脑任意目录（建议 `D:\m3u_player`），双击里面的 exe 即可运行 |
 
 > ⚠️ Windows 版特别提醒：
 > - Windows 版以 **zip 压缩包**发布，下载后**先解压再运行**，解压出来的文件夹要保持完整（别把 exe 单独拷出来），双击里面的 `m3u_player_fvp.exe` 即可。
@@ -309,7 +309,7 @@ nobuffer=true
 | first_frame_timeout | 首帧超时（秒） | 数字 |
 | heartbeat_timeout | 心跳超时（秒） | 数字 |
 
-> 提示：升级软件时，把 `config.ini` 一起保留/备份，参数就不会丢。旧版本存在 `%APPDATA%\m3u_player_fvp` 的配置，新版首次运行会自动复制到 exe 目录（不会删除旧文件）。
+> 提示：升级软件时，把 `config.ini` 一起保留/备份，参数就不会丢。配置和频道清单都跟着软件文件夹走，软件不会自动迁移旧位置的文件。
 
 ---
 
