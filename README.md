@@ -299,6 +299,8 @@ m3u_player_fvp/
 │   └── widget_test.dart          ← 自动化测试
 ├── pubspec.yaml                  ← 项目"身份证"：版本号、依赖库清单
 ├── README.md                     ← 本说明文档
+├── THIRD_PARTY_LICENSES.md       ← 第三方开源组件许可声明（发布时必须一起带上）
+├── LICENSES/                     ← 各第三方组件的许可原文（fvp、FFmpeg 等）
 └── LICENSE                       ← 开源许可（MIT）
 ```
 
@@ -314,6 +316,10 @@ m3u_player_fvp/
 | fvp 0.38.1（MDK 内核） | 播放引擎 | 真正负责把视频流解码播放出来的底层库 |
 | FFmpeg | 解码器 | 让各种视频格式都能播的"万能解码器" |
 | 自写 MethodChannel | 原生桥接 | 让 Flutter 和系统底层（选文件、存配置）对话 |
+
+> 📄 **开源许可说明**：本项目基于上述开源组件构建（MIT / BSD-3 / Apache-2.0 / LGPL 等宽松许可），
+> 全部第三方组件的版权与许可声明见 **[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)**，
+> 发布包内也附带各许可原文（`LICENSES/` 目录）。
 
 ---
 
@@ -356,3 +362,6 @@ A：本软件要求 **Android 7.0（API 24）及以上**，Android 6.0 及以下
 MIT License — Copyright (c) 2026 **gtyphoon**
 
 简单说：你可以自由使用、修改、分发这个软件，但需保留版权声明；作者不对使用后果负责。详见 [LICENSE](LICENSE)。
+
+本项目使用的第三方开源组件（fvp/MDK、FFmpeg 等）版权归其各自作者所有，
+许可声明见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
