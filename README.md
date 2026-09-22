@@ -6,6 +6,34 @@
 
 > 大白话解释：监控摄像头通常用网页看，一次只能看一个。这个软件可以把摄像头地址整理成一个清单（M3U 文件），然后像看九宫格一样同时看 4 路、8 路、16 路画面，还能一键切换"清晰/流畅"、翻页、分组。
 
+---
+
+### 🎬 支持什么视频（格式支持矩阵）
+
+**先看播放链路**（三层，各干各的）：
+**fvp**（Flutter 插件，负责"把画面显示到界面"）→ **MDK**（播放内核，负责"调度解码"）→ **FFmpeg**（解码器，负责"把视频数据变成画面"）。
+MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引擎**——你在 `pubspec.yaml` 里只会看到 fvp 这一个播放相关的依赖，打开安装包文件夹则会看到 `fvp.dll`（Flutter 插件）、`mdk.dll`（播放内核）、`ffmpeg-9.dll`（解码器）。
+
+**视频编码：**
+
+| 分类 | 编码 | 播放方式 |
+|------|------|---------|
+| 监控主打（最擅长） | **H.265 / HEVC**（含 HEVC-in-FLV）、**H.264** | 硬件解码 + 软件解码兜底 |
+| FFmpeg 软件解码全覆盖 | H.263、MPEG-2、MPEG-4（DivX/Xvid）、VP8/VP9、AV1、WMV、VC-1、MJPEG 等 | 软件解码 |
+
+**音频编码：** AAC、MP3、AC3/E-AC3、FLAC、Opus、Vorbis、PCM 等常见格式。
+
+**封装格式：** FLV、TS、MP4、MKV、MPEG-PS、AAC 等。
+
+**传输协议：** RTSP（监控主流）、HTTP-FLV / RTMP（拉流主流）、HTTP(S) 直连、HLS（m3u8）、UDP 等。
+
+**硬件解码说明：**
+- Windows：走 Media Foundation（MFT）硬解 H.264 / HEVC / MJPEG；VP9 / AV1 / 部分 HEVC 需要设备装了微软商店的免费解码扩展。
+- Android：走系统 MediaCodec 硬解。
+- 硬解失败或不可用时**自动回退软件解码**；控制面板里也可以手动切换"自动 / 硬解 / 软解"。
+
+> 一句话：**监控场景（H.265 + H.264，走 RTSP / HTTP-FLV）是完整优化的**；其它常见视频格式也能播（软件解码），只是本软件定位是监控多画面播放器。
+
 ![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows-blue)
 ![Version](https://img.shields.io/badge/version-4.0.0-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -14,6 +42,7 @@
 
 ## 目录（写给谁看）
 
+- [支持什么视频（格式支持矩阵）](#-支持什么视频格式支持矩阵)
 - [我完全不懂编程，只想用这个软件](#一我完全不懂编程只想用这个软件)
 - [我想自己从源码运行 / 构建 / 修改](#二我想自己从源码运行--构建--修改)
 - [频道清单 M3U 怎么写](#三频道清单-m3u-怎么写)
