@@ -37,10 +37,10 @@
 | Android 手机 / 电视盒（64 位，2017 年以后的大多数设备） | `app-arm64-v8a-release.apk` | 复制到手机/电视盒，点击安装（需允许"安装未知来源应用"） |
 | Android 老设备（32 位） | `app-armeabi-v7a-release.apk` | 同上 |
 | Android 模拟器 / 特殊 x86 设备 | `app-x86_64-release.apk` | 同上 |
-| Windows 电脑（64 位） | `m3u_player_fvp.exe` 及同目录的 `data` 文件夹、`fvp.dll` | **整个文件夹**复制到电脑任意目录（建议 `D:\m3u_player`），双击 exe 即可运行 |
+| Windows 电脑（64 位） | `m3u_player_fvp-windows.zip` | 解压到电脑任意目录（建议 `D:\m3u_player`），双击里面的 exe 即可运行 |
 
 > ⚠️ Windows 版特别提醒：
-> - `m3u_player_fvp.exe` 只是一个"外壳"，真正的内容在同目录的 `data` 文件夹和 `fvp.dll` 里。**复制时要整个文件夹一起复制**，只拷 exe 会打不开。
+> - Windows 版以 **zip 压缩包**发布，下载后**先解压再运行**，解压出来的文件夹要保持完整（别把 exe 单独拷出来），双击里面的 `m3u_player_fvp.exe` 即可。
 > - 首次运行可能会被 Windows 提示"未知发布者"，点"仍要运行"即可（软件是开源的，无风险）。
 > - 你的设置会保存在 exe 旁边的 `config.ini` 文件里，**升级版本时请保留这个文件**（或备份它），这样你的参数不会丢。
 
@@ -140,7 +140,7 @@ flutter run -d <设备ID>  # 把 <设备ID> 换成上一步显示的 ID
 flutter build windows --release
 ```
 
-产物在：`build\windows\x64\runner\Release\`，把里面的 **整个文件夹**（exe + data + dll）复制给别人即可使用。
+产物在：`build\windows\x64\runner\Release\`，把**整个文件夹**压缩成 zip 包发布即可（别人解压后双击 exe 就能用）。
 
 **构建 Android 版**（一次打出 3 个安装包，分别适配不同芯片）：
 
@@ -312,7 +312,7 @@ m3u_player_fvp/
 ## 七、常见问题
 
 **Q1：双击 exe 没反应 / 提示缺少 DLL？**
-A：请确认你复制的是整个文件夹（exe + `data` + `fvp.dll` + `mdk.dll` 等），而不是只拷了一个 exe。缺文件时软件是起不来的。
+A：确认你用的是解压后的完整文件夹（不要只把 exe 单独拷出来），文件夹里的 `data`、`fvp.dll` 等文件缺失时软件起不来。
 
 **Q2：画面一直"连接中"？**
 A：检查摄像头地址在浏览器里能不能打开；确认手机/电脑和摄像头在**同一个网络**（监控一般只在局域网内访问）；尝试在控制面板把"解码方式"从自动切换为"硬解"或"软解"。
