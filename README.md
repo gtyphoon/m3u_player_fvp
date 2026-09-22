@@ -1,6 +1,8 @@
 ﻿# M3U 多路监控播放器（M3U Player）
 
-基于 **Flutter + fvp（MDK 内核）** 的 M3U 多路监控播放器，专注于 **HEVC-in-FLV 摄像头流** 的流畅播放，支持 **Android 手机 / Android TV / Windows 桌面** 三端，一套代码、多画面网格布局、全部参数可调。
+一个把多个监控摄像头画面**同时放在一个屏幕上看**的播放器。支持 **Android 手机 / Android 电视盒 / Windows 电脑**，一套代码、三种设备都能用。
+
+> 大白话解释：监控摄像头通常用网页看，一次只能看一个。这个软件可以把摄像头地址整理成一个清单（M3U 文件），然后像看九宫格一样同时看 4 路、8 路、16 路画面，还能一键切换"清晰/流畅"、翻页、分组。
 
 ![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows-blue)
 ![Version](https://img.shields.io/badge/version-4.0.0-green)
@@ -8,241 +10,336 @@
 
 ---
 
-## 目录
+## 目录（写给谁看）
 
-- [功能特性](#功能特性)
-- [界面与操作](#界面与操作)
-- [M3U 配置详解](#m3u-配置详解)
-- [平台支持](#平台支持)
-- [构建指南](#构建指南)
-- [配置说明](#配置说明)
-- [项目结构](#项目结构)
-- [技术栈](#技术栈)
-- [版本历史](#版本历史)
-- [许可](#许可)
-
----
-
-## 功能特性
-
-### 播放能力
-- **HEVC-in-FLV 硬解**：专为监控摄像头流（H.265 编码 FLV 封装）优化，支持硬解 / 软解 / 自动切换
-- **多画面布局**：1 / 2 / 4 / 8 / 16 路同时播放，列布局 / 行布局自由切换
-- **快速翻页**：内容不满屏自动翻页；满屏时滑动或滚轮到顶部 / 底部翻页，预加载下一屏
-- **低延迟优化**：nobuffer / flush 开关、可调探测大小与分析时长，显著降低首屏延迟
-
-### 操作方式
-| 平台 | 操作 |
-|------|------|
-| 触屏（手机/平板） | 双击进全屏、双指缩放、上下滑动翻页、点右上角关闭全屏 |
-| 遥控器（Android TV） | 方向键 + OK 键，网格导航；返回键双击退出应用 |
-| 鼠标（Windows） | 双击进全屏、**ESC / 鼠标右键退出全屏**、滚轮到顶/底翻页 |
-
-### 参数可调（控制面板）
-- 解码方式（自动 / 硬解 / 软解）
-- 探测大小（8K / 32K / 64K / 128K）
-- 分析时长（10ms / 20ms / 50ms / 100ms）
-- nobuffer / flush 低延迟开关
-- 首帧超时 / 心跳超时 / 缓冲秒数 / 重连最大间隔
-- 屏幕方向（竖屏 / 横屏 / 自动，Windows 默认横屏）
-- 面板样式（底部 / 右侧 / 自动）、分组、码流、频道数等
-
-### 其他
-- **配置持久化**：所有设置自动保存，下次启动恢复（Windows 保存在 exe 目录 `config.ini`）
-- **画中画**：Android 8.0+ 支持
-- **内置操作说明**：各平台专属说明，首启自动弹出
-- **关于弹窗**：版本信息、组件架构、作者信息
+- [我完全不懂编程，只想用这个软件](#一我完全不懂编程只想用这个软件)
+- [我想自己从源码运行 / 构建 / 修改](#二我想自己从源码运行--构建--修改)
+- [频道清单 M3U 怎么写](#三频道清单-m3u-怎么写)
+- [配置说明](#四配置说明)
+- [项目结构（每个文件是干嘛的）](#五项目结构每个文件是干嘛的)
+- [技术栈](#六技术栈)
+- [常见问题](#七常见问题)
+- [版本历史](#八版本历史)
+- [许可](#九许可)
 
 ---
 
-## 界面与操作
+## 一、我完全不懂编程，只想用这个软件
 
-### 网格模式（主界面）
-- 顶部：标题、当前分组、翻页指示、导入按钮
-- 网格：每路监控实时画面，双击放大为单路/全屏
-- 底部：控制面板按钮（加载 M3U / 操作说明 / 关于 / 重置参数）
-- 右上角：关闭全屏、画中画（Android）
+**你不需要安装任何开发工具，只需要拿到现成的安装文件，装到设备上就能用。**
 
-### 全屏模式
-- 双击任意画面进入全屏；双击返回网格（触屏）
-- Windows：按 **ESC** 或点击**鼠标右键**返回网格
-- 全屏时双指/滚轮缩放画面
+### 1. 先拿到安装文件
 
-### 控制面板
-| 按钮 | 功能 |
-|------|------|
-| 加载 M3U 文件 | 导入本地 M3U/M3U8/TXT 频道列表 |
-| 操作说明 | 查看本机平台的操作指南 |
-| 关于 | 版本号、组件架构构成、作者信息 |
-| 重置所有参数 | 恢复默认参数（Windows 保持横屏） |
+找发布者（或从项目的发布页面）获取以下任一文件：
+
+| 你的设备 | 下载哪个文件 | 安装方式 |
+|---------|------------|---------|
+| Android 手机 / 电视盒（64 位，2017 年以后的大多数设备） | `app-arm64-v8a-release.apk` | 复制到手机/电视盒，点击安装（需允许"安装未知来源应用"） |
+| Android 老设备（32 位） | `app-armeabi-v7a-release.apk` | 同上 |
+| Android 模拟器 / 特殊 x86 设备 | `app-x86_64-release.apk` | 同上 |
+| Windows 电脑（64 位） | `m3u_player_fvp.exe` 及同目录的 `data` 文件夹、`fvp.dll` | **整个文件夹**复制到电脑任意目录（建议 `D:\m3u_player`），双击 exe 即可运行 |
+
+> ⚠️ Windows 版特别提醒：
+> - `m3u_player_fvp.exe` 只是一个"外壳"，真正的内容在同目录的 `data` 文件夹和 `fvp.dll` 里。**复制时要整个文件夹一起复制**，只拷 exe 会打不开。
+> - 首次运行可能会被 Windows 提示"未知发布者"，点"仍要运行"即可（软件是开源的，无风险）。
+> - 你的设置会保存在 exe 旁边的 `config.ini` 文件里，**升级版本时请保留这个文件**（或备份它），这样你的参数不会丢。
+
+### 2. 准备你的频道清单（M3U 文件）
+
+软件要播放监控，需要一份"频道地址清单"。两种方式：
+
+- **方式一（推荐）**：在软件里点"加载 M3U 文件"，选择你电脑/手机里的 M3U 文件。
+- **方式二**：在 exe（或 APK）所在目录放一个 `my_channels.m3u` 文件，软件启动时自动加载。
+
+M3U 文件就是**记事本就能写**的文本文件（详见[第三节](#三频道清单-m3u-怎么写)）。
+
+### 3. 基本操作
+
+| 操作 | 手机/平板（触摸） | Windows（鼠标键盘） | 电视盒（遥控器） |
+|------|-----------------|-------------------|----------------|
+| 放大单个画面 | 双击画面 | 双击画面 | 选中后按 OK |
+| 退出放大 | 双击 | 按 **ESC** 或点**鼠标右键** | 按返回键 |
+| 翻页 | 上下滑动 | 鼠标滚轮（滚到顶部/底部自动翻页） | 方向键 + OK |
+| 打开/关闭设置面板 | 点左上角菜单按钮 | 点左上角菜单按钮 或 按**菜单键** | 按**菜单键 MENU** |
+| 切换分组/清晰流畅 | 在设置面板里点 | 在设置面板里点 | 方向键上下选择 + OK 确认 |
 
 ---
 
-## M3U 配置详解
+## 二、我想自己从源码运行 / 构建 / 修改
 
-本播放器使用 M3U 文件描述频道。核心约定：
+如果你想让软件跑在你自己的电脑上、自己打包安装包、或者改里面的功能，按下面的步骤来。**这些步骤只需要做一次**。
 
-### 分组
-`group-title` 指定频道分组，多个分组用分号 `;` 分隔：
+### 第 1 步：安装必备工具
+
+| 要装的工具 | 干什么用的 | 在哪下载 |
+|-----------|----------|---------|
+| **Flutter SDK（3.47 或更新）** | 整个软件就是用它写出来和编译的 | https://flutter.dev（国内可访问镜像 https://flutter.cn） |
+| **Visual Studio 2022** | 编译 Windows 版需要它（装的时候勾选 **"使用 C++ 的桌面开发"** 组件） | https://visualstudio.microsoft.com |
+| **Android Studio（可选）** | 只有你要编译 Android 版才需要，会附带 Android SDK | https://developer.android.com/studio |
+| **JDK 17 或更新** | 编译 Android 版需要 | https://adoptium.net |
+
+装完 Flutter 后，打开命令行（Windows 按 `Win + R`，输入 `cmd` 回车），输入下面命令检查环境是否正常：
+
+```bash
+flutter doctor
+```
+
+看到大部分项是绿色对勾即可，个别警告不影响本项目的构建。
+
+### 第 2 步：下载本项目源码
+
+**方式 A：用 git 下载（推荐）**
+
+```bash
+git clone https://github.com/gtyphoon/m3u_player_fvp.git
+cd m3u_player_fvp
+```
+
+**方式 B：直接下载 ZIP**
+
+在项目 GitHub 页面点绿色 **Code** 按钮 → **Download ZIP** → 解压到电脑任意位置（建议路径不要有中文和空格）。
+
+### 第 3 步：安装项目依赖（只需一次）
+
+在项目文件夹里打开命令行，执行：
+
+```bash
+flutter pub get
+```
+
+这条命令会把项目用到的第三方库下载到本地。看到类似 `Got dependencies!` 就成功了。
+
+### 第 4 步：直接运行（不用打包）
+
+**在 Windows 上运行：**
+
+```bash
+flutter run -d windows
+```
+
+第一次运行会编译几分钟，之后会弹出软件窗口。按 `q` 关闭。
+
+**在 Android 手机/电视盒上运行：**
+
+先用数据线连接手机（打开开发者选项里的"USB 调试"），然后：
+
+```bash
+flutter devices        # 看看设备是否被识别
+flutter run -d <设备ID>  # 把 <设备ID> 换成上一步显示的 ID
+```
+
+> 说明：`flutter run` 是给开发者调试用的。日常使用请用第 5 步打正式安装包。
+
+### 第 5 步：构建正式安装包（发布用）
+
+**构建 Windows 版**（输出一个 exe 文件）：
+
+```bash
+flutter build windows --release
+```
+
+产物在：`build\windows\x64\runner\Release\`，把里面的 **整个文件夹**（exe + data + dll）复制给别人即可使用。
+
+**构建 Android 版**（一次打出 3 个安装包，分别适配不同芯片）：
+
+```bash
+flutter build apk --release --split-per-abi
+```
+
+产物在：`build\app\outputs\flutter-apk\`，会得到 3 个文件：
+
+| 文件 | 适合的设备 |
+|------|-----------|
+| `app-arm64-v8a-release.apk` | 主流 64 位手机 / 电视盒（绝大多数设备选这个） |
+| `app-armeabi-v7a-release.apk` | 2017 年以前的 32 位老设备 |
+| `app-x86_64-release.apk` | 电脑模拟器 / 少数 x86 芯片设备 |
+
+> ⚠️ 小知识：为什么打 3 个包？因为 Android 设备用的芯片（CPU）分好几种，每种要不同的包才能跑得又快又稳。Flutter 项目里**不要**在 `android/app/build.gradle.kts` 中写 `ndk.abiFilters`，否则会和 `--split-per-abi` 冲突导致构建失败。
+
+### 第 6 步：怎么修改（按你想改的东西找）
+
+**改频道清单** → 打开项目根目录或 exe 目录下的 `my_channels.m3u`（没有就新建一个），按[第三节](#三频道清单-m3u-怎么写)的格式写。也可以在软件里点"加载 M3U 文件"直接导入。
+
+**改软件版本号** → 打开 `pubspec.yaml`，找到 `version: 4.0.0+12` 这一行，改成你想要的（格式：`主版本.次版本.修订号+构建号`，例如 `4.1.0+13`）。改完重新构建即可生效。
+
+**改默认参数（比如默认清晰度、默认加载几路）** → 打开 `lib/home_page.dart`，文件靠上位置的这些行就是默认值：
+
+```dart
+String _quality = '清晰';            // 默认码流
+int _layout = 2;                     // 默认布局（2 = 2x2 共四路）
+int _rows = 0;                       // 行布局（0 = 自动）
+int _probesize = 32768;              // 播放器"探测大小"（字节）
+int _analyzeduration = 20000;        // 播放器"分析时长"（微秒）
+```
+
+改成你想要的值，保存后重新构建（第 5 步的命令）。
+
+**改界面上的文字**（按钮名字、说明文字等）→ 这些文字都在 `lib/home_page.dart` 里，直接搜索想改的文字（例如"控制面板"）就能找到并修改。
+
+**改播放器底层参数**（解码方式、超时时间等）→ 打开 `lib/native_player.dart`，里面是对播放内核（fvp）的封装。
+
+**改配置的保存/读取逻辑** → 打开 `lib/native_io.dart`。
+
+**改完如何生效？** 修改代码后，重新执行第 5 步的构建命令即可生成新安装包；如果只是调试，用第 4 步的 `flutter run` 直接看效果。
+
+> 给开发者的提示：本仓库使用 **Git** 管理版本。改完代码后建议：`git add .` → `git commit -m "描述你改了什么"` → 之后再推到你的仓库。
+
+---
+
+## 三、频道清单 M3U 怎么写
+
+M3U 本质上就是一个**纯文本文件**（用记事本或 VS Code 编辑，保存时编码选 **UTF-8**），每条频道占两行：第一行 `#EXTINF` 开头是频道的描述，第二行是播放地址。
+
+### 最简单的例子
 
 ```
-#EXTINF:-1 group-title="教室1;清晰",教室1号机
+#EXTM3U
+#EXTINF:-1 group-title="教室1",一号教室
+http://192.168.1.10:8080/live/ch01
+#EXTINF:-1 group-title="教室2",二号教室
+http://192.168.1.10:8080/live/ch02
 ```
 
-- 分号 `;` 后为**码流名**（清晰 / 流畅，可自定义）
-- 一个频道只识别第一个 `group-title`
-- 没有分组标记的频道归入"全部"
+### 分组（把频道分门别类）
 
-### 码流切换（清晰 / 流畅）
-同一摄像头两个地址（清晰 HEVC / 流畅 H.264）：
+`group-title="分组名"` 就是分组名，软件里按"分组"按钮就能切换。**用分号 `;` 分隔分组名和码流名**：
 
 ```
+#EXTINF:-1 group-title="教学楼;清晰",101教室
+http://10.0.0.11:8080/live/101_0
+```
+
+### 清晰 / 流畅 双码流（同一个摄像头两个地址）
+
+| 地址结尾 | 含义 |
+|---------|------|
+| `_0` | 清晰（H.265/HEVC 编码，画质好，网速要求高） |
+| `_1` | 流畅（H.264 编码，画质一般，更省流量更流畅） |
+
+```text
 #EXTINF:-1 group-title="教室1;清晰",教室1号机
 http://192.168.1.10:8080/live/ch01_0
 #EXTINF:-1 group-title="教室1;流畅",教室1号机
 http://192.168.1.10:8080/live/ch01_1
 ```
 
-- URL 结尾 `_0` = 清晰（HEVC），`_1` = 流畅（H.264）
-- 控制面板切换"码流"即可在两组之间切换
+这样写好后，在软件控制面板切换"码流：清晰/流畅"，画面会整体切换。
 
-### 完整示例
-```
-#EXTM3U
-#EXTINF:-1 group-title="教学楼;清晰",101教室
-http://10.0.0.11:8080/live/101_0
-#EXTINF:-1 group-title="教学楼;流畅",101教室
-http://10.0.0.11:8080/live/101_1
-#EXTINF:-1 group-title="操场;清晰",操场东
-http://10.0.0.12:8080/live/east_0
-#EXTINF:-1 group-title="操场;流畅",操场东
-http://10.0.0.12:8080/live/east_1
-```
+> 注意：
+> - 一个频道只识别**第一个** `group-title`。
+> - 没有写分组名的频道，会归入"全部"分组。
 
 ---
 
-## 平台支持
+## 四、配置说明
 
-| 平台 | 架构 | 产物 | 说明 |
-|------|------|------|------|
-| Android | arm64-v8a | `app-arm64-v8a-release.apk` | 主流 64 位手机 / 电视盒 |
-| Android | armeabi-v7a | `app-armeabi-v7a-release.apk` | 32 位老设备 |
-| Android | x86_64 | `app-x86_64-release.apk` | 模拟器 / x86 设备 |
-| Windows | x64 | `m3u_player_fvp.exe` | 桌面版，配置存 exe 目录 |
-
----
-
-## 构建指南
-
-### 环境要求
-| 依赖 | 版本 |
-|------|------|
-| Flutter | 3.47+（Dart 3.13+） |
-| Android SDK | minSdk 24 / targetSdk 34，JDK 17+ |
-| Visual Studio | 2022（含"使用 C++ 的桌面开发"组件） |
-
-### 构建 Android（分 ABI 输出 3 个 APK）
-```bash
-flutter build apk --release --split-per-abi
-# 输出：build/app/outputs/flutter-apk/
-#   app-arm64-v8a-release.apk
-#   app-armeabi-v7a-release.apk
-#   app-x86_64-release.apk
-```
-
-> 注意：`android/app/build.gradle.kts` 中**不要**写 `ndk.abiFilters`，否则与 `--split-per-abi` 的 Gradle splits 机制冲突导致构建失败。
-
-### 构建 Windows
-```bash
-flutter build windows --release
-# 输出：build/windows/x64/runner/Release/m3u_player_fvp.exe
-```
-
-### 运行调试
-```bash
-flutter run -d <device>       # 手机/模拟器
-flutter run -d windows        # Windows 桌面
-```
-
----
-
-## 配置说明
-
-所有面板参数保存到配置文件，启动时自动加载。
+你在控制面板里调的所有参数，软件都会自动保存，下次启动自动恢复。
 
 | 平台 | 配置文件位置 |
 |------|-------------|
-| Windows | exe 所在目录 `config.ini`（UTF-8 无 BOM） |
-| Android | SharedPreferences（应用内部） |
+| Windows | exe 旁边的 `config.ini`（文本格式，UTF-8 编码） |
+| Android | 应用内部存储（卸载软件才会清掉） |
 
-### config.ini 键值说明（Windows）
+### Windows 的 config.ini 里都有什么
 
-| 键 | 说明 | 示例 |
-|----|------|------|
-| layout | 布局（网格 2x2 等） | 2 |
-| columns / rows | 自定义行列数 | 0（自动） |
-| preload | 预加载页数 | 0 |
-| group | 当前分组 | 全部 |
-| tv_mode | 电视模式（auto/on/off） | auto |
-| quality | 码流（清晰/流畅） | 清晰 |
-| panel_style | 面板样式（auto/bottom/right） | auto |
-| orientation | 屏幕方向（portrait/landscape/auto） | landscape |
-| decoder | 解码方式（auto/hard/soft） | auto |
-| probesize | 探测大小（字节） | 32768 |
-| analyzeduration | 分析时长（微秒） | 20000 |
-| nobuffer / flush_packets | 低延迟开关 | true |
-| first_frame_timeout | 首帧超时（秒） | 3 |
-| heartbeat_timeout | 心跳超时（秒） | 5 |
-| buffer_seconds | 缓冲秒数 | 0 |
-| reconnect_delay_max | 重连最大间隔（秒） | 7 |
-| guide_shown | 首次操作说明是否已展示 | true |
+用记事本打开 `config.ini`，会看到类似：
 
-> 首次运行 Windows 版会自动把旧版本存在 `%APPDATA%\m3u_player_fvp` 或工作目录的 `config.ini` / `my_channels.m3u` 复制到 exe 目录（不删除源文件）。
+```ini
+layout=2
+preload=0
+group=全部
+quality=清晰
+orientation=landscape
+decoder=auto
+probesize=32768
+analyzeduration=20000
+nobuffer=true
+```
+
+| 键 | 含义 | 可选值 |
+|----|------|--------|
+| layout | 布局（几行几列） | 数字 |
+| group | 当前分组 | 你的分组名 |
+| quality | 码流 | 清晰 / 流畅 |
+| orientation | 屏幕方向 | portrait（竖）/ landscape（横）/ auto |
+| decoder | 解码方式 | auto / hard（硬解）/ soft（软解） |
+| probesize | 播放器探测大小（字节） | 数字 |
+| analyzeduration | 分析时长（微秒） | 数字 |
+| nobuffer / flush_packets | 低延迟开关 | true / false |
+| first_frame_timeout | 首帧超时（秒） | 数字 |
+| heartbeat_timeout | 心跳超时（秒） | 数字 |
+
+> 提示：升级软件时，把 `config.ini` 一起保留/备份，参数就不会丢。旧版本存在 `%APPDATA%\m3u_player_fvp` 的配置，新版首次运行会自动复制到 exe 目录（不会删除旧文件）。
 
 ---
 
-## 项目结构
+## 五、项目结构（每个文件是干嘛的）
 
 ```
-├── lib/
-│   ├── main.dart              # 入口：注册 fvp、启动方向策略（Windows 保持横屏）
-│   ├── home_page.dart         # 主页面：网格/全屏/控制面板/操作说明/关于
-│   ├── m3u_parser.dart        # M3U 解析（分组、码流、URL 提取）
-│   ├── native_io.dart         # 原生 IO：文件选择、配置持久化、旧配置迁移
-│   └── native_player.dart     # fvp 播放器封装（硬解/软解、参数配置）
-├── android/                   # Android 工程（自写 MainActivity，minSdk 24）
-├── windows/                   # Windows 工程（Win32 runner）
+m3u_player_fvp/
+├── lib/                          ← 软件的核心代码（主要改这里）
+│   ├── main.dart                 ← 程序入口（启动、屏幕方向策略：Windows 默认横屏）
+│   ├── home_page.dart            ← 主页面：画面网格、全屏、控制面板、操作说明、关于
+│   ├── m3u_parser.dart           ← 解析 M3U 清单（分组、码流、地址提取）
+│   ├── native_io.dart            ← 文件选择、配置保存/读取
+│   └── native_player.dart        ← 播放内核封装（硬解/软解、超时参数）
+├── android/                      ← Android 工程文件（一般不用动）
+├── windows/                      ← Windows 工程文件（一般不用动）
 ├── test/
-│   └── widget_test.dart       # 冒烟测试
-├── pubspec.yaml               # 依赖与版本
-├── README.md                  # 本文档
-└── LICENSE                    # MIT 许可
+│   └── widget_test.dart          ← 自动化测试
+├── pubspec.yaml                  ← 项目"身份证"：版本号、依赖库清单
+├── README.md                     ← 本说明文档
+└── LICENSE                       ← 开源许可（MIT）
 ```
 
----
-
-## 技术栈
-
-| 组件 | 说明 |
-|------|------|
-| Flutter 3.47 / Dart 3.13 | UI 框架 |
-| fvp 0.38.1（MDK 内核） | 播放内核：HEVC-in-FLV 硬解 |
-| FFmpeg | 解码 / 解复用 |
-| 自写 MethodChannel | 文件选择、SharedPreferences（替代三方插件，兼容 Android 6 电视） |
+> 对不懂开发的人来说：**日常改东西只碰两个文件就够了**——想改频道列表就改 `my_channels.m3u`，想改版本号就改 `pubspec.yaml`。其余文件看看就好，不用动。
 
 ---
 
-## 版本历史
+## 六、技术栈
+
+| 组件 | 干什么的 | 大白话 |
+|------|---------|--------|
+| Flutter 3.47 / Dart 3.13 | UI 框架 | 写界面、控制逻辑用的"语言和工具" |
+| fvp 0.38.1（MDK 内核） | 播放引擎 | 真正负责把视频流解码播放出来的底层库 |
+| FFmpeg | 解码器 | 让各种视频格式都能播的"万能解码器" |
+| 自写 MethodChannel | 原生桥接 | 让 Flutter 和系统底层（选文件、存配置）对话 |
+
+---
+
+## 七、常见问题
+
+**Q1：双击 exe 没反应 / 提示缺少 DLL？**
+A：请确认你复制的是整个文件夹（exe + `data` + `fvp.dll` + `mdk.dll` 等），而不是只拷了一个 exe。缺文件时软件是起不来的。
+
+**Q2：画面一直"连接中"？**
+A：检查摄像头地址在浏览器里能不能打开；确认手机/电脑和摄像头在**同一个网络**（监控一般只在局域网内访问）；尝试在控制面板把"解码方式"从自动切换为"硬解"或"软解"。
+
+**Q3：我改了 my_channels.m3u 但软件里没变化？**
+A：软件只在启动时加载清单。改完文件后**重启软件**；或者在控制面板里点"加载 M3U 文件"重新导入。另外注意文件编码要存成 **UTF-8**。
+
+**Q4：构建时报 `ndk.abiFilters` 相关错误？**
+A：去 `android/app/build.gradle.kts` 里确认没有写 `ndk { abiFilters ... }`，删掉后重新构建。
+
+**Q5：Windows 上想恢复默认设置？**
+A：控制面板里点"重置所有参数"，或者关掉软件后删除 exe 旁边的 `config.ini` 再启动。
+
+**Q6：遥控器（电视盒）方向键不听话？**
+A：确认设备是否支持遥控器输入；在控制面板检查"电视模式"设置（auto 通常能自动识别）。
+
+---
+
+## 八、版本历史
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| **v4.0.0** | 2026-09 | Windows 版完善：ESC/右键退出全屏、滚轮翻页、配置持久化到 exe 目录、配置合并写入修复；控制面板"关于"；分 ABI 构建 |
+| **v4.0.0** | 2026-09 | Windows 版完善：ESC/右键退出全屏、滚轮翻页、配置持久化到 exe 目录、配置合并写入修复；控制面板"关于"；分 ABI 构建；遥控器焦点管理修复 |
 | v3.9.0 | 2026-09 | 稳定版：所有参数可调、完整操作说明、全屏沉浸式 |
 
 ---
 
-## 许可
+## 九、许可
 
 MIT License — Copyright (c) 2026 **gtyphoon**
 
-详见 [LICENSE](LICENSE)。
+简单说：你可以自由使用、修改、分发这个软件，但需保留版权声明；作者不对使用后果负责。详见 [LICENSE](LICENSE)。
