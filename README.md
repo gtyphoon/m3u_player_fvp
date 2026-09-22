@@ -313,9 +313,12 @@ m3u_player_fvp/
 | 组件 | 干什么的 | 大白话 |
 |------|---------|--------|
 | Flutter 3.47 / Dart 3.13 | UI 框架 | 写界面、控制逻辑用的"语言和工具" |
-| fvp 0.38.1（MDK 内核） | 播放引擎 | 真正负责把视频流解码播放出来的底层库 |
-| FFmpeg | 解码器 | 让各种视频格式都能播的"万能解码器" |
+| fvp 0.38.1 | 播放器封装 | Flutter 侧的播放器接口（MDK 的官方封装） |
+| MDK 0.38.x | 播放内核 | 真正负责把视频流解码播放出来的底层引擎 |
+| FFmpeg 9.x（LGPL-2.1+） | 解码器 | 让各种视频格式都能播的"万能解码器"（动态加载，可替换） |
 | 自写 MethodChannel | 原生桥接 | 让 Flutter 和系统底层（选文件、存配置）对话 |
+
+> 其余 Dart 依赖（file_picker 8.3.7、desktop_drop 0.4.4、path_provider 2.1.6 等）的精确版本以 `pubspec.lock` 为准。
 
 > 📄 **开源许可说明**：本项目基于上述开源组件构建（MIT / BSD-3 / Apache-2.0 / LGPL 等宽松许可），
 > 全部第三方组件的版权与许可声明见 **[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)**，

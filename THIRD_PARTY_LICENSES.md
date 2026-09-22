@@ -8,21 +8,20 @@
 | 组件 | 版本 | 许可 | 版权 |
 |------|------|------|------|
 | [fvp](https://pub.dev/packages/fvp)（MDK 的 Flutter 播放器封装） | 0.38.1 | BSD-3-Clause | Copyright 2022 Wang Bin. All rights reserved. |
-| [file_picker](https://pub.dev/packages/file_picker) | ^8.1.0 | MIT License | Copyright (c) 2017 Miguel Ruivo |
-| [desktop_drop](https://pub.dev/packages/desktop_drop) | ^0.4.4 | Apache-2.0 | Copyright (c) 2021 kinglisky / xiao zhou |
-| [path_provider](https://pub.dev/packages/path_provider) | ^2.1.0 | BSD-3-Clause | Copyright 2013 The Flutter Authors |
-| [shared_preferences](https://pub.dev/packages/shared_preferences) | ^2.3.0 | BSD-3-Clause | Copyright 2013 The Flutter Authors |
-| [cupertino_icons](https://pub.dev/packages/cupertino_icons) | ^1.0.8 | MIT License | Copyright (c) 2016 The Flutter Authors |
+| [file_picker](https://pub.dev/packages/file_picker) | 8.3.7 | MIT License | Copyright (c) 2018 Miguel Ruivo |
+| [desktop_drop](https://pub.dev/packages/desktop_drop) | 0.4.4 | Apache-2.0 | Copyright (c) 2021 kinglisky / xiao zhou |
+| [path_provider](https://pub.dev/packages/path_provider) | 2.1.6 | BSD-3-Clause | Copyright 2013 The Flutter Authors |
+| [shared_preferences](https://pub.dev/packages/shared_preferences) | 2.5.5 | BSD-3-Clause | Copyright 2013 The Flutter Authors |
+| [cupertino_icons](https://pub.dev/packages/cupertino_icons) | 1.0.9 | MIT License | Copyright (c) 2016 The Flutter Authors |
 
-> 说明：以上均以动态链接 / 常规依赖方式使用，许可均为宽松型（MIT / BSD-3 / Apache-2.0），
-> 允许自由使用与再分发，只需保留版权声明，本项目已在 `LICENSES/` 中附带各许可原文。
+> 说明：以上均为**锁定版本**（见 `pubspec.lock`），以动态链接 / 常规依赖方式使用，许可均为宽松型（MIT / BSD-3 / Apache-2.0），允许自由使用与再分发，只需保留版权声明，本项目已在 `LICENSES/` 中附带各许可原文。
 
 ## 播放内核（随 fvp 捆绑的二进制组件）
 
-| 组件 | 说明 | 许可 | 版权 |
-|------|------|------|------|
-| [MDK (MediaDevelopmentKit)](https://github.com/wang-bin/mdk-sdk) | 跨平台多媒体播放内核（`mdk.dll` 等），fvp 的底层引擎 | BSD-3-Clause（随 fvp 包分发） | Copyright 2022 Wang Bin. All rights reserved. |
-| [FFmpeg](https://ffmpeg.org/) | 视频解码/解复用（`ffmpeg-9.dll`），由 MDK SDK 动态加载 | **LGPL-2.1+**（详见下文） | Copyright (c) 2000-2024 the FFmpeg developers |
+| 组件 | 版本 | 说明 | 许可 | 版权 |
+|------|------|------|------|------|
+| [MDK (MediaDevelopmentKit)](https://github.com/wang-bin/mdk-sdk) | 0.38.x | 跨平台多媒体播放内核（`mdk.dll` 等），fvp 的底层引擎 | BSD-3-Clause（随 fvp 包分发） | Copyright 2022 Wang Bin. All rights reserved. |
+| [FFmpeg](https://ffmpeg.org/) | 9.x（avbuild master/lite 构建） | 视频解码/解复用（`ffmpeg-9.dll`），由 MDK SDK 动态加载 | **LGPL-2.1+**（详见下文） | Copyright (c) 2000-2024 the FFmpeg developers |
 
 ### 关于 FFmpeg 的 LGPL 说明
 
