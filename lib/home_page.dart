@@ -674,6 +674,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       final tp = _totalPages;
       final finalPage = _pendingPage.clamp(1, tp);
       _pendingPage = 0;
+      // 记录翻页前的页码：翻页方向必须和旧页码比，不能和已赋值的新页码比
+      final prevPage = _page;
       if (finalPage != _page) {
         _page = finalPage;
       }
@@ -684,12 +686,13 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         _lastStableChannels = _pageChannels; // 保存稳定页内容
         _reconcile();
         setState(() {});
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_gridScroll.hasClients) return;
-        final target =
-            finalPage > _page ? 0.0 : _gridScroll.position.maxScrollExtent;
-        _gridScroll.jumpTo(target);
+        // 必须等新页布局完成后再跳：下一页 → 新页顶部；上一页 → 新页底部
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_gridScroll.hasClients) return;
+          _gridScroll.jumpTo(
+            finalPage > prevPage ? 0.0 : _gridScroll.position.maxScrollExtent,
+          );
+        });
       });
     });
   }
