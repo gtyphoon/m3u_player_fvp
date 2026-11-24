@@ -3,6 +3,10 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 
+/// 桌面平台（Windows / Linux）：配置、频道清单、文件对话框都走本地文件，
+/// 不使用 Android 的 MethodChannel 实现。
+bool get kIsDesktop => Platform.isWindows || Platform.isLinux;
+
 /// 原生 IO 通道：替代 file_picker / path_provider / shared_preferences 三个插件。
 ///
 /// 这三个插件都会传递依赖 flutter_plugin_android_lifecycle（minSdk 24），
@@ -19,11 +23,11 @@ class NativeIO {
 
   /// 应用文档目录绝对路径（内部存储，无需任何权限）
   ///
-  /// Windows：使用软件 exe 本身所在目录，config.ini / my_channels.m3u
+  /// Windows / Linux：使用软件可执行文件所在目录，config.ini / my_channels.m3u
   /// 与程序放在一起（跟随文件夹整体移动/备份，不做任何"自动迁移"——
   /// 自动迁移会意外带上本机旧位置的配置或频道清单）。
   static Future<String> getAppDir() async {
-    if (Platform.isWindows) {
+    if (kIsDesktop) {
       return File(Platform.resolvedExecutable).parent.path;
     }
     return (await _ch.invokeMethod<String>('getAppDir')) ?? '/';
@@ -31,7 +35,7 @@ class NativeIO {
 
   /// 系统文件选择器选 M3U/M3U8/TXT，返回文件文本内容；取消返回 null
   static Future<String?> pickM3U() async {
-    if (Platform.isWindows) {
+    if (kIsDesktop) {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['m3u', 'm3u8', 'txt'],
@@ -44,7 +48,7 @@ class NativeIO {
   }
 
   static Future<String?> prefsGetString(String key) async {
-    if (Platform.isWindows) {
+    if (kIsDesktop) {
       // 等待未完成的写入，避免读到旧内容
       await _winWriteLock;
       final dir = await getAppDir();
@@ -75,7 +79,7 @@ class NativeIO {
   /// 读现有配置 → 更新本次键值 → 整体写回，保证单键写入（如 guide_shown）
   /// 不会覆盖掉其他配置项；串行锁保证并发"读-改-写"不互相覆盖。
   static Future<void> prefsSetBatch(Map<String, String> config) async {
-    if (Platform.isWindows) {
+    if (kIsDesktop) {
       final prev = _winWriteLock;
       final completer = Completer<void>();
       _winWriteLock = completer.future;

@@ -194,7 +194,7 @@ class L10n {
         'Use +/- buttons in the control panel: concurrent count (1~16)',
     '还可以用加减按钮调节：列布局、行布局（1~4列/行）':
         'You can also adjust columns / rows (1~4 each) with +/- buttons',
-    'Windows 电脑版': 'Windows (PC)',
+    '电脑版（Windows / Linux）': 'Desktop (Windows / Linux)',
     '【进入全屏】': '[Enter Fullscreen]',
     '双击某个视频画面': 'Double-click a video tile',
     '【退出全屏】': '[Exit Fullscreen]',

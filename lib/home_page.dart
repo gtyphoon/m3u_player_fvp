@@ -77,7 +77,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   PanelStyle _panelStyle = PanelStyle.auto;
 
   // 方向锁定：null=自动，landscape=强制横屏，portrait=强制竖屏
-  String? _orientationLock = Platform.isWindows ? 'landscape' : 'portrait';
+  String? _orientationLock = kIsDesktop ? 'landscape' : 'portrait';
 
   // 全屏播放的频道
   Channel? _fullscreenChannel;
@@ -180,7 +180,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       final tvMode = await NativeIO.prefsGetString('tv_mode') ?? 'auto';
       final styleName = await NativeIO.prefsGetString('panel_style') ?? '';
       final orient = await NativeIO.prefsGetString('orientation') ??
-          (Platform.isWindows ? 'landscape' : 'portrait');
+          (kIsDesktop ? 'landscape' : 'portrait');
       final decoder = await NativeIO.prefsGetString('decoder') ?? 'auto';
       final probesize = await NativeIO.prefsGetInt('probesize') ?? 32768;
       final analyzeduration = await NativeIO.prefsGetInt('analyzeduration') ?? 20000;
@@ -635,7 +635,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       // 其他参数
       _quality = '清晰';
       // 方向重置跟随平台默认：Windows 默认横屏，其他平台默认竖屏
-      _orientationLock = Platform.isWindows ? 'landscape' : 'portrait';
+      _orientationLock = kIsDesktop ? 'landscape' : 'portrait';
       _tvOverride = null;
       _panelStyle = PanelStyle.auto;
     });
@@ -772,7 +772,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   bool _hardKey(KeyEvent event) {
     final k = event.logicalKey;
     // Windows 平台：ESC 退出全屏返回网格 / 关闭面板
-    if (Platform.isWindows && k == LogicalKeyboardKey.escape) {
+    if (kIsDesktop && k == LogicalKeyboardKey.escape) {
       if (event is KeyRepeatEvent) return true; // 长按只触发一次
       if (event is! KeyDownEvent) return true;
       if (_fullscreenChannel != null) {
@@ -891,7 +891,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   KeyEventResult _onGlobalKey(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
       // Windows 平台：ESC 退出全屏返回网格 / 关闭面板
-      if (Platform.isWindows && event.logicalKey == LogicalKeyboardKey.escape) {
+      if (kIsDesktop && event.logicalKey == LogicalKeyboardKey.escape) {
         if (_fullscreenChannel != null) {
           _fullscreenChannel = null;
           Navigator.of(context).pop();
@@ -1121,7 +1121,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       },
       child: Scaffold(
       backgroundColor: Colors.black,
-      body: Platform.isWindows
+      body: kIsDesktop
         ? DropTarget(
             onDragDone: (details) {
               if (details.files.isNotEmpty) {
@@ -1622,9 +1622,9 @@ Future<void> showHelpDialog(BuildContext context, {bool dismissible = true}) {
               L10n.t('还可以用加减按钮调节：列布局、行布局（1~4列/行）'),
             ]),
             // Windows 电脑版专属操作说明（仅 Windows 显示，Android/TV 不显示）
-            if (Platform.isWindows) ...[
+            if (kIsDesktop) ...[
               const SizedBox(height: 10),
-              _helpSection(L10n.t('Windows 电脑版'), [
+              _helpSection(L10n.t('电脑版（Windows / Linux）'), [
                 '',
                 L10n.t('【打开 / 关闭控制面板】'),
                 L10n.t('点击左上角菜单按钮'),

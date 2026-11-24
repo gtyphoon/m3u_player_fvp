@@ -16,7 +16,7 @@ Future<void> main() async {
   } catch (_) {}
   // Windows 桌面端默认横屏（窗口 1280x720），不强制竖屏；
   // 移动端保持竖屏启动，之后由主页面按保存的配置应用方向。
-  if (!Platform.isWindows) {
+  if (!kIsDesktop) {
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   }
   runApp(const M3UPlayerApp());
