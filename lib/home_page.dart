@@ -18,8 +18,8 @@ const List<int> kLayouts = [1, 2, 4, 5, 6, 7, 8, 16];
 
 // ---------- 应用信息（关于弹窗展示，需与 pubspec.yaml 保持一致） ----------
 const String kAppName = 'M3U播放器';
-const String kAppVersion = '4.0.3';
-const String kAppBuild = '15';
+const String kAppVersion = '4.0.4';
+const String kAppBuild = '16';
 const String kAppAuthor = 'gtyphoon';
 const String kAppLicense = 'MIT License';
 
@@ -1647,10 +1647,9 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   bool _isRecordingUrl(String url) => _recordings.containsKey(url);
 
-  /// 按画面实际编码决定封装格式（"自动"模式）。
-  /// H.265(HEVC)：Windows 和 Android 上 MDK 都写不进 TS/MP4（只有一帧的废文件），
-  /// 所以不分平台一律用 MKV。
-  /// H.264：桌面用 TS（监控设备/NVR 通用），Android 用 MP4（相册能出缩略图）。
+  /// 按画面实际编码决定封装格式（"自动"模式），不区分平台：
+  /// H.265(HEVC)：MDK 在 Windows 和 Android 上都写不进 TS/MP4，只有一帧的废文件，一律用 MKV。
+  /// H.264：一律用 TS（监控设备/NVR 通用，断流也能播）。
   String _resolveRecFormat(NativePlayerController c) {
     if (_recFormat != 'auto') return _recFormat;
     final codec = c.videoCodec.toLowerCase();
@@ -1660,9 +1659,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         codec.contains('265') ||
         codec.contains('hev1') ||
         codec.contains('hvc1');
-    if (hevc) return 'mkv';
-    if (Platform.isAndroid) return 'mp4';
-    return 'ts';
+    return hevc ? 'mkv' : 'ts';
   }
 
   Future<void> _startRecording(Channel channel) async {
@@ -3629,8 +3626,8 @@ class _AdvancedSheetState extends State<_AdvancedSheet> {
                       ],
                     ),
                     _hint(L10n.t(
-                        '自动（推荐）：H.264 用 TS（Windows/Linux，监控设备通用）或 MP4（Android，相册能出缩略图）；H.265 一律用 MKV——Windows 和 Android 都写不进 TS/MP4',
-                        'Auto (recommended): H.264 → TS on desktop, MP4 on Android; H.265 always MKV (TS/MP4 fail on Windows and Android)')),
+                        '自动（推荐）：H.264 一律用 TS（监控设备/NVR 通用，断流也能播）；H.265 一律用 MKV——Windows 和 Android 都写不进 TS/MP4',
+                        'Auto (recommended): H.264 → TS everywhere (NVR friendly); H.265 → MKV always (TS/MP4 fail on Windows and Android)')),
                     _hint(L10n.t('手动选 TS/MP4 遇到不支持的流时，几秒内会自动改用 MKV 并提示，画质不受影响')),
 
                     const SizedBox(height: 16),
