@@ -1,4 +1,4 @@
-﻿# M3U 多路监控播放器（M3U Player）
+# M3U 多路监控播放器（M3U Player）
 
 一个把多路视频流**放在一个屏幕上看**的多画面播放器。播 **IPTV、直播、监控摄像头**都行（RTSP / HTTP-FLV / HLS 等任意 M3U 视频源），支持 **Android 手机 / Android 电视盒 / Windows 电脑 / Linux 电脑（x86_64 桌面）**，一套代码、多种设备都能用。
 
@@ -35,7 +35,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 > 一句话：**IPTV / 直播 / 监控都能用**——H.265 + H.264 编码、RTSP / HTTP-FLV 协议的组合是优化重点；其它常见格式也能播（软件解码）。
 
 ![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows-blue)
-![Version](https://img.shields.io/badge/version-4.0.0-green)
+![Version](https://img.shields.io/badge/version-4.0.1-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 ---
@@ -69,7 +69,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 | Android 老设备（32 位） | `app-armeabi-v7a-release.apk` | 同上 |
 | Android 模拟器 / 特殊 x86 设备 | `app-x86_64-release.apk` | 同上 |
 | Windows 电脑（64 位） | `m3u_player-windows.zip` | 解压到电脑任意目录（建议 `D:\m3u_player`），双击里面的 exe 即可运行 |
-| Linux 电脑（x86_64 桌面，Ubuntu / Debian / 麒麟 / Deepin / Fedora / Arch 等） | `M3U_player_v4.0.0_linux-x64.tar.gz` | 解压后进入文件夹，双击 `m3u_player_fvp`（或终端执行 `./m3u_player_fvp`）；包内附《使用说明.txt》 |
+| Linux 电脑（x86_64 桌面，Ubuntu / Debian / 麒麟 / Deepin / Fedora / Arch 等） | `M3U_player_v4.0.1_linux-x64.tar.gz` | 解压后进入文件夹，双击 `m3u_player_fvp`（或终端执行 `./m3u_player_fvp`）；包内附《使用说明.txt》 |
 
 > ⚠️ Windows 版特别提醒：
 > - Windows 版以 **zip 压缩包**发布，下载后**先解压再运行**，解压出来的文件夹要保持完整（别把 exe 单独拷出来），双击里面的 `m3u_player_fvp.exe` 即可。
@@ -127,7 +127,11 @@ M3U 文件就是**记事本就能写**的文本文件（详见[第三节](#三�
    - Windows / Linux：软件所在目录下的 `recordings` 文件夹。
    - Android：公共**下载**目录下的 `M3U播放器/recordings`（先在应用内部录，停止后自动搬过去）。
 7. 文件名是"频道名_日期_时间.ts"，第二段起会加 `_part1`、`_part2`。
-8. 小提示：分段切换的瞬间，新文件开头可能有不到 1 秒要等下一个关键帧（部分播放器会先黑一下）。
+8. **TS / MP4 不是所有流都能封装**：监控常用的 **HEVC（H.265）编码 FLV 流**，在 Windows 上
+   只能写进 MKV，选 TS/MP4 时只能得到二十来 KB 的坏文件。软件会**在开始录制 5 秒内自动检测**：
+   如果发现文件几乎不增长，就自动改用 **MKV** 重新录（会弹提示，画质无损），所以你不会拿到废文件。
+   Linux / Android 端没有这个问题，TS 可以直接用。
+9. 小提示：分段切换的瞬间，新文件开头可能有不到 1 秒要等下一个关键帧（部分播放器会先黑一下）。
 
 ---
 
@@ -248,11 +252,11 @@ flutter build linux --release
 3. 打包发布（连同许可文件一起压缩）：
 
 ```bash
-mkdir -p /tmp/pkg/M3U_player_v4.0.0_linux-x64
-cp -a build/linux/x64/release/bundle/. /tmp/pkg/M3U_player_v4.0.0_linux-x64/
-cp LICENSE THIRD_PARTY_LICENSES.md /tmp/pkg/M3U_player_v4.0.0_linux-x64/
-cp -a LICENSES /tmp/pkg/M3U_player_v4.0.0_linux-x64/
-cd /tmp/pkg && tar -czf M3U_player_v4.0.0_linux-x64.tar.gz M3U_player_v4.0.0_linux-x64
+mkdir -p /tmp/pkg/M3U_player_v4.0.1_linux-x64
+cp -a build/linux/x64/release/bundle/. /tmp/pkg/M3U_player_v4.0.1_linux-x64/
+cp LICENSE THIRD_PARTY_LICENSES.md /tmp/pkg/M3U_player_v4.0.1_linux-x64/
+cp -a LICENSES /tmp/pkg/M3U_player_v4.0.1_linux-x64/
+cd /tmp/pkg && tar -czf M3U_player_v4.0.1_linux-x64.tar.gz M3U_player_v4.0.1_linux-x64
 ```
 
 > 说明：项目已包含 `linux/` 平台脚手架（`linux/runner`、`linux/flutter`、`CMakeLists.txt`），无需再执行 `flutter create --platforms=linux .`（真跑了会把 `.metadata` 里的 windows 条目冲掉，并顺手升级 `pubspec.lock` 的依赖版本）。
@@ -261,7 +265,7 @@ cd /tmp/pkg && tar -czf M3U_player_v4.0.0_linux-x64.tar.gz M3U_player_v4.0.0_lin
 
 **改频道清单** → 打开项目根目录或 exe 目录下的 `my_channels.m3u`（没有就新建一个），按[第三节](#三频道清单-m3u-怎么写)的格式写。也可以在软件里点"加载 M3U 文件"直接导入。
 
-**改软件版本号** → 打开 `pubspec.yaml`，找到 `version: 4.0.0+12` 这一行，改成你想要的（格式：`主版本.次版本.修订号+构建号`，例如 `4.1.0+13`）。改完重新构建即可生效。
+**改软件版本号** → 打开 `pubspec.yaml`，找到 `version: 4.0.1+13` 这一行，改成你想要的（格式：`主版本.次版本.修订号+构建号`，例如 `4.1.0+13`）。改完重新构建即可生效。
 
 **改默认参数（比如默认清晰度、默认加载几路）** → 打开 `lib/home_page.dart`，文件靠上位置的这些行就是默认值：
 
@@ -465,6 +469,7 @@ A：不能。Flutter 的 Linux 构建需要 Linux 系统上的 clang/GTK3 工具
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| **v4.0.1** | 2026-11 | 单路录制（MDK 流复制、TS/MKV/MP4、默认 30 分钟分段、退出全屏需确认停止）；录制格式自检与自动降级（HEVC 编码的 FLV 源在 Windows 上无法写 TS/MP4 时自动改用 MKV）；截图与录制设置并入控制面板"高级设置"；界面语言默认跟随系统可手动切换 |
 | **v4.0.0** | 2026-09 | Windows 版完善：ESC/右键退出全屏、滚轮翻页、配置持久化到 exe 目录、配置合并写入修复；控制面板"关于"；分 ABI 构建；遥控器焦点管理修复；Linux 桌面版；单路截图（PNG）+ 单元格右键/长按菜单 + 控制面板"高级设置"（语言与截图保存位置） |
 | v3.9.0 | 2026-09 | 稳定版：所有参数可调、完整操作说明、全屏沉浸式 |
 

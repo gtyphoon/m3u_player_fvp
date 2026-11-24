@@ -18,8 +18,8 @@ const List<int> kLayouts = [1, 2, 4, 5, 6, 7, 8, 16];
 
 // ---------- 应用信息（关于弹窗展示，需与 pubspec.yaml 保持一致） ----------
 const String kAppName = 'M3U播放器';
-const String kAppVersion = '4.0.0';
-const String kAppBuild = '12';
+const String kAppVersion = '4.0.1';
+const String kAppBuild = '13';
 const String kAppAuthor = 'gtyphoon';
 const String kAppLicense = 'MIT License';
 
@@ -1661,10 +1661,12 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         controller: c,
         part: 0,
         path: path,
+        fmt: _recFormat,
         startedAt: DateTime.now(),
       );
       _recordings[channel.url] = rec;
       _scheduleSegment(rec);
+      _scheduleCheck(rec);
       if (mounted) setState(() {});
       _showTip(L10n.t('已开始录制', 'Recording started'));
     } on PlatformException catch (e) {
@@ -1674,6 +1676,52 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     } catch (_) {
       _showTip(L10n.t('录制启动失败，请检查保存目录'));
     }
+  }
+
+  /// 某些源（如 HEVC 编码的 FLV/RTSP）在部分平台下 MDK 无法写入 TS / MP4：
+  /// 只有容器头 + 一两帧（约 20KB），后续写入失败。
+  /// 启动 3 秒后检查文件大小，若几乎没增长就自动改用 MKV 重新录，保证不丢内容。
+  void _scheduleCheck(_Recording rec) {
+    rec.checkTimer?.cancel();
+    if (rec.fmt == 'mkv') return; // MKV 已是最稳格式，不再检测
+    rec.checkTimer = Timer(const Duration(seconds: 3), () async {
+      if (!rec.active || rec.fmt == 'mkv') return;
+      final f = File(rec.path);
+      final s1 = await f.exists() ? await f.length() : 0;
+      await Future.delayed(const Duration(seconds: 2));
+      if (!rec.active || rec.fmt == 'mkv') return;
+      final s2 = await f.exists() ? await f.length() : 0;
+      // 正常流 2 秒至少涨几 KB；若几乎不涨，说明 muxer 写入失败（只有容器头）
+      if (s2 - s1 < 1024) await _fallbackToMkv(rec);
+    });
+  }
+
+  Future<void> _fallbackToMkv(_Recording rec) async {
+    final badPath = rec.path;
+    try {
+      rec.controller.stopRecord();
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 200));
+    String next;
+    try {
+      next = await CaptureStore.recordingPath(rec.name, _captureDir,
+          part: rec.part, format: 'mkv');
+    } catch (_) {
+      return;
+    }
+    if (!rec.controller.startRecord(next, format: 'mkv')) {
+      return;
+    }
+    rec.path = next;
+    rec.fmt = 'mkv';
+    try {
+      if (await File(badPath).exists()) await File(badPath).delete();
+    } catch (_) {}
+    _scheduleCheck(rec);
+    if (mounted) setState(() {});
+    _showTip(L10n.t(
+        '当前画面无法用 TS/MP4 封装（该流编码不支持），已自动改用 MKV，画质无损',
+        'This stream cannot be muxed into TS/MP4; switched to MKV (lossless)'));
   }
 
   /// 30 分钟（可配置）到点切下一段；录制不中断播放
@@ -1691,8 +1739,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     try {
       rec.controller.stopRecord();
       final next = await CaptureStore.recordingPath(rec.name, _captureDir,
-          part: rec.part + 1, format: _recFormat);
-      if (!rec.controller.startRecord(next, format: _recFormat)) {
+          part: rec.part + 1, format: rec.fmt);
+      if (!rec.controller.startRecord(next, format: rec.fmt)) {
         _recordings.remove(rec.url);
         rec.active = false;
         if (mounted) setState(() {});
@@ -1703,7 +1751,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       rec.path = next;
       rec.startedAt = DateTime.now();
       _scheduleSegment(rec);
-      _publishQuietly(prevPath, rec.part - 1);
+      if (rec.fmt != 'mkv') _scheduleCheck(rec);
+      _publishQuietly(prevPath, rec.part - 1, rec.fmt);
     } catch (_) {
       // 切换失败：保持原状，下一段再试
     }
@@ -1715,9 +1764,10 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     if (rec == null) return;
     rec.active = false;
     rec.timer?.cancel();
+    rec.checkTimer?.cancel();
     rec.controller.stopRecord();
     if (mounted) setState(() {});
-    final path = await _publishQuietly(rec.path, rec.part);
+    final path = await _publishQuietly(rec.path, rec.part, rec.fmt);
     if (!notify) return;
     _showTip(path != null
         ? L10n.t('录制已保存：$path', 'Recording saved: {path}', {'path': path})
@@ -1725,10 +1775,10 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   }
 
   /// 把一段录制文件发布到最终位置；返回可展示路径，失败返回 null
-  Future<String?> _publishQuietly(String path, int part) async {
+  Future<String?> _publishQuietly(String path, int part, [String? fmt]) async {
     final name = path.split(Platform.pathSeparator).last;
     try {
-      return await CaptureStore.publishRecording(path, name, _recFormat);
+      return await CaptureStore.publishRecording(path, name, fmt ?? _recFormat);
     } catch (_) {
       return null;
     }
@@ -3184,6 +3234,7 @@ class _Recording {
     required this.controller,
     required this.part,
     required this.path,
+    required this.fmt,
     required this.startedAt,
   });
 
@@ -3192,8 +3243,10 @@ class _Recording {
   final NativePlayerController controller;
   int part; // 分段序号（0 为第一段）
   String path; // 当前分段文件路径
+  String fmt; // 当前段实际使用的封装格式（可能因自检降级从 ts 变成 mkv）
   DateTime startedAt;
   Timer? timer;
+  Timer? checkTimer;
   bool active = true;
 }
 
@@ -3545,6 +3598,8 @@ class _AdvancedSheetState extends State<_AdvancedSheet> {
                       ],
                     ),
                     _hint(L10n.t('TS 为流复制、最省性能且断流也能播放；MP4 需等停止后才完整，兼容性最好')),
+                    _hint(L10n.t(
+                        '部分 HEVC 编码的流（常见于监控设备的 FLV 源）在 Windows 上无法封装成 TS/MP4，此时会自动改用 MKV 并提示，画质不受影响')),
 
                     const SizedBox(height: 16),
                     Text(L10n.t('分段时长'),
