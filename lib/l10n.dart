@@ -99,6 +99,44 @@ class L10n {
         'Default is the app folder; leave it unset to keep the default.',
     'Android 上直接保存到"下载/M3U播放器"，可在文件管理器查看':
         'On Android files go to Downloads/M3U播放器 and are visible in the file manager.',
+    '录制保存位置': 'Recording folder',
+    '打开录制文件夹': 'Open recording folder',
+    '录制封装格式': 'Recording container',
+    '分段时长': 'Segment length',
+    '不分段': 'No split',
+    '分钟': 'min',
+    'TS 为流复制、最省性能且断流也能播放；MP4 需等停止后才完整，兼容性最好':
+        'TS is stream-copied, cheapest and still playable if interrupted; MP4 is most compatible but only complete after stopping.',
+    '到点自动换新文件，单段过大会影响播放和拷贝；默认 30 分钟':
+        'A new file starts automatically; huge files are slow to play and copy. Default 30 min.',
+    '录制文件与截图放在同一个根目录下，分 screenshots / recordings 两个子目录':
+        'Recording and snapshot files share one root folder, under screenshots / recordings.',
+    '开始录制': 'Start recording',
+    '停止录制': 'Stop recording',
+    '已开始录制': 'Recording started',
+    '录制已停止并保存': 'Recording stopped and saved',
+    '正在录制': 'Recording in progress',
+    '退出全屏前请先确认：停止录制，或在后台继续录制。':
+        'Confirm what happens to the recording before leaving fullscreen.',
+    '继续录制并退出': 'Keep recording',
+    '停止录制并退出': 'Stop and exit',
+    '该画面仍在后台录制，可在网格菜单中停止':
+        'Still recording in background — stop it from the grid menu.',
+    '该画面还没加载好，暂时不能录制':
+        'Picture not ready yet — cannot record right now.',
+    '录制启动失败，请稍后重试': 'Failed to start recording, please retry.',
+    '录制启动失败，请检查保存目录':
+        'Failed to start recording — check the save folder.',
+    '需要存储权限才能保存录制文件，请在系统设置里允许本软件使用存储':
+        'Storage permission is required to save recordings. Allow it in system settings.',
+    '该路画面已切换，录制已停止并保存':
+        'Channel switched — recording stopped and saved.',
+    '分段录制中断（画面可能已断开）':
+        'Segment recording interrupted (connection may have dropped).',
+    '录制已停止，但保存到下载目录失败':
+        'Recording stopped, but saving to Downloads failed.',
+    '录制中不能切换封装格式，请先停止录制':
+        'Stop recording before changing the container format.',
     '完成': 'Done',
 
     // ---------- 加载与提示 ----------

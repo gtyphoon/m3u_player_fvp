@@ -247,6 +247,29 @@ class NativePlayerController {
     );
   }
 
+  /// 开始把当前正在播的流录制到 [path]（MDK 流复制，不重新解码，
+  /// 画质与原流一致、CPU 占用极低）。返回 false 表示播放器未就绪。
+  /// [format] 指定封装格式，默认 ts（对 HEVC / 直播流兼容性最好）。
+  bool startRecord(String path, {String format = 'ts'}) {
+    final p = _player;
+    if (p == null || _disposed) return false;
+    try {
+      p.record(to: path, format: format);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 停止录制（MDK 会 flush 并关闭文件）
+  void stopRecord() {
+    final p = _player;
+    if (p == null) return;
+    try {
+      p.record(); // to = null 即停止
+    } catch (_) {}
+  }
+
   void dispose() {
     if (_disposed) return;
     _disposed = true;

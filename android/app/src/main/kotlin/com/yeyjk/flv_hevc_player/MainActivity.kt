@@ -117,6 +117,18 @@ class MainActivity : FlutterActivity() {
                         saveCaptureAsync(name, subdir, bytes, mime, result)
                     }
                 }
+                // 录制文件（可能几百 MB）：从应用私有目录流式复制到公共下载目录
+                "publishCaptureFile" -> {
+                    val srcPath = call.argument<String>("path")
+                    val name = call.argument<String>("name")
+                    val subdir = call.argument<String>("subdir") ?: ""
+                    val mime = call.argument<String>("mime") ?: "application/octet-stream"
+                    if (srcPath == null || name == null || !File(srcPath).exists()) {
+                        result.error("BAD_ARGS", "source file not found", null)
+                    } else {
+                        publishFileAsync(File(srcPath), name, subdir, mime, result)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -272,16 +284,131 @@ class MainActivity : FlutterActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_WRITE_STORAGE) {
-            val p = pendingSave ?: return
-            pendingSave = null
-            if (grantResults.isNotEmpty() &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED
-            ) {
-                saveCaptureAsync(p.name, p.subdir, p.bytes, p.mime, p.result)
-            } else {
-                p.result.error("PERMISSION_DENIED", "storage permission denied", null)
+            val granted = grantResults.isNotEmpty() &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED
+            val p = pendingSave
+            if (p != null) {
+                pendingSave = null
+                if (granted) {
+                    saveCaptureAsync(p.name, p.subdir, p.bytes, p.mime, p.result)
+                } else {
+                    p.result.error("PERMISSION_DENIED", "storage permission denied", null)
+                }
+                return
+            }
+            val q = pendingPublish
+            if (q != null) {
+                pendingPublish = null
+                if (granted) {
+                    publishFileAsync(q.src, q.name, q.subdir, q.mime, q.result)
+                } else {
+                    q.result.error("PERMISSION_DENIED", "storage permission denied", null)
+                }
             }
         }
+    }
+
+    // ---------- 录制文件发布：私有目录 → 公共"下载"目录（流式复制，支持大文件） ----------
+
+    private data class PendingPublish(
+        val src: File,
+        val name: String,
+        val subdir: String,
+        val mime: String,
+        val result: MethodChannel.Result
+    )
+
+    private var pendingPublish: PendingPublish? = null
+
+    private fun publishFileAsync(
+        src: File,
+        name: String,
+        subdir: String,
+        mime: String,
+        result: MethodChannel.Result
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingPublish = PendingPublish(src, name, subdir, mime, result)
+            requestPermissions(
+                arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                REQUEST_WRITE_STORAGE
+            )
+            return
+        }
+        Thread {
+            try {
+                val path = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    publishToDownloads(src, name, subdir, mime)
+                } else {
+                    publishLegacy(src, name, subdir)
+                }
+                runOnUiThread { result.success(path) }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    result.error("PUBLISH_FAILED", e.message ?: "publish failed", null)
+                }
+            }
+        }.start()
+    }
+
+    /** API 29+：流式复制到 MediaStore Downloads */
+    private fun publishToDownloads(
+        src: File,
+        name: String,
+        subdir: String,
+        mime: String
+    ): String {
+        val relative = "Download/${CAPTURE_ROOT}" +
+                (if (subdir.isEmpty()) "" else "/$subdir")
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, mime)
+            put(MediaStore.Downloads.RELATIVE_PATH, relative)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+        ) ?: throw IOException("MediaStore insert failed")
+        try {
+            contentResolver.openOutputStream(uri)?.use { out ->
+                src.inputStream().use { input ->
+                    input.copyTo(out, 1024 * 1024)
+                }
+            } ?: throw IOException("openOutputStream failed")
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            try {
+                contentResolver.delete(uri, null, null)
+            } catch (_: Exception) {
+            }
+            throw e
+        }
+        return "$relative/$name"
+    }
+
+    /** API 24~28：流式复制到外部存储公共下载目录 */
+    private fun publishLegacy(src: File, name: String, subdir: String): String {
+        val root = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            CAPTURE_ROOT
+        )
+        val dir = if (subdir.isEmpty()) root else File(root, subdir)
+        if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
+            throw IOException("mkdirs failed: ${dir.absolutePath}")
+        }
+        val f = File(dir, name)
+        src.inputStream().use { input ->
+            FileOutputStream(f).use { out ->
+                input.copyTo(out, 1024 * 1024)
+            }
+        }
+        MediaScannerConnection.scanFile(this, arrayOf(f.absolutePath), null, null)
+        return f.absolutePath
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

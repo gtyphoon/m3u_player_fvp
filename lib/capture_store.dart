@@ -30,11 +30,12 @@ class CaptureStore {
       kind == CaptureKind.screenshot ? 'png' : 'ts';
 
   /// 生成文件名：频道名（清洗非法字符）+ 时间戳 + 分段号 + 扩展名
-  static String fileName(String channelName, CaptureKind kind, {int part = 0}) {
+  static String fileName(String channelName, CaptureKind kind,
+      {int part = 0, String? ext}) {
     final safe = safeName(channelName);
     final t = stamp(DateTime.now());
     final p = part > 0 ? '_part$part' : '';
-    return '${safe}_$t$p.${extOf(kind)}';
+    return '${safe}_$t$p.${ext ?? extOf(kind)}';
   }
 
   /// 去掉文件名里不能用的字符（Windows / Android 都安全），并限制长度
@@ -96,4 +97,56 @@ class CaptureStore {
 
   /// 桌面端展示用的默认保存根目录
   static Future<String> defaultRoot() async => await NativeIO.getAppDir();
+
+  // ---------- 录制 ----------
+
+  /// 录制文件的最终扩展名（默认 ts）
+  static String recordingExt(String format) =>
+      format == 'mp4' ? 'mp4' : (format == 'mkv' ? 'mkv' : 'ts');
+
+  /// 录制分段相对路径（桌面写程序目录/recordings；Android 先写应用私有目录，
+  /// 停止后再复制到公共"下载/M3U播放器/recordings"）
+  static Future<String> recordingPath(
+    String channelName,
+    String? customDir, {
+    int part = 0,
+    String format = 'ts',
+  }) async {
+    final name = fileName(channelName, CaptureKind.recording,
+        part: part, ext: recordingExt(format));
+    if (!kIsDesktop) {
+      final base = await NativeIO.getAppDir();
+      final d = Directory('$base${Platform.pathSeparator}recordings');
+      await d.create(recursive: true);
+      return '${d.path}${Platform.pathSeparator}$name';
+    }
+    final dir = await recordingDir(customDir: customDir);
+    return '${dir.path}${Platform.pathSeparator}$name';
+  }
+
+  /// Android：把录好的私有文件发布到公共下载目录，成功后删除私有文件。
+  /// 桌面直接返回原路径（文件本来就在最终位置）。
+  static Future<String> publishRecording(
+    String filePath,
+    String displayName,
+    String format,
+  ) async {
+    if (kIsDesktop) return filePath;
+    final mime = format == 'mp4'
+        ? 'video/mp4'
+        : (format == 'mkv' ? 'video/x-matroska' : 'video/mp2t');
+    final path = await _ch.invokeMethod<String>('publishCaptureFile', {
+      'path': filePath,
+      'name': displayName,
+      'subdir': folderOf(CaptureKind.recording),
+      'mime': mime,
+    });
+    if (path == null || path.isEmpty) {
+      throw StateError('publishCaptureFile returned null');
+    }
+    try {
+      await File(filePath).delete();
+    } catch (_) {}
+    return path;
+  }
 }
