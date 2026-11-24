@@ -247,6 +247,14 @@ class NativePlayerController {
     );
   }
 
+  /// 当前视频编码名（如 hevc / h264）；画面未就绪时返回空串。
+  /// 录制时用来决定封装格式：H.265 在部分平台写不进 TS/MP4。
+  String get videoCodec {
+    final v = _player?.mediaInfo.video;
+    if (v == null || v.isEmpty) return '';
+    return v.first.codec.codec.toString();
+  }
+
   /// 开始把当前正在播的流录制到 [path]（MDK 流复制，不重新解码，
   /// 画质与原流一致、CPU 占用极低）。返回 false 表示播放器未就绪。
   /// [format] 指定封装格式，默认 ts（对 HEVC / 直播流兼容性最好）。

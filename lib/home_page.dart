@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -18,8 +18,8 @@ const List<int> kLayouts = [1, 2, 4, 5, 6, 7, 8, 16];
 
 // ---------- 应用信息（关于弹窗展示，需与 pubspec.yaml 保持一致） ----------
 const String kAppName = 'M3U播放器';
-const String kAppVersion = '4.0.1';
-const String kAppBuild = '13';
+const String kAppVersion = '4.0.2';
+const String kAppBuild = '14';
 const String kAppAuthor = 'gtyphoon';
 const String kAppLicense = 'MIT License';
 
@@ -94,7 +94,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   // ---------- 录制 ----------
   final Map<String, _Recording> _recordings = {}; // key = 频道 URL
-  String _recFormat = 'ts'; // ts / mkv / mp4
+  String _recFormat = 'auto'; // auto / ts / mkv / mp4
   int _recSegmentMin = 30; // 分段时长（分钟），0=不分段
 
   // 全屏播放的频道
@@ -265,7 +265,14 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         ? null
         : captureDir.trim();
     final recFormat = await NativeIO.prefsGetString('rec_format');
-    _recFormat = (recFormat == null || recFormat.isEmpty) ? 'ts' : recFormat;
+    final recMigrated = await NativeIO.prefsGetString('rec_format_auto');
+    if (recMigrated == null || recMigrated.isEmpty) {
+      // 首次运行新版：默认改为"自动"，把旧版的默认值一次性迁移过来
+      _recFormat = 'auto';
+      NativeIO.prefsSetBatch({'rec_format': 'auto', 'rec_format_auto': '1'});
+    } else {
+      _recFormat = (recFormat == null || recFormat.isEmpty) ? 'auto' : recFormat;
+    }
     _recSegmentMin = await NativeIO.prefsGetInt('rec_segment_min') ?? 30;
     if (mounted) setState(() {});
   }
@@ -293,6 +300,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       'reconnect_delay_max': '$_reconnectDelayMax',
       'capture_dir': _captureDir ?? '',
       'rec_format': _recFormat,
+      'rec_format_auto': '1',
       'rec_segment_min': '$_recSegmentMin',
     });
   }
@@ -1640,6 +1648,23 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   bool _isRecordingUrl(String url) => _recordings.containsKey(url);
 
   /// 开始录制某一路；已在录制则忽略
+  /// 按画面实际编码决定封装格式（"自动"模式）。
+  /// H.265 在 Windows 上写不进 TS/MP4，只能用 MKV；其余平台 H.265 用 MP4，
+  /// 这样手机相册、文件管理器能出缩略图，也方便分享。
+  String _resolveRecFormat(NativePlayerController c) {
+    if (_recFormat != 'auto') return _recFormat;
+    final codec = c.videoCodec.toLowerCase();
+    final hevc = codec.contains('hevc') ||
+        codec.contains('h265') ||
+        codec.contains('h.265') ||
+        codec.contains('265') ||
+        codec.contains('hev1') ||
+        codec.contains('hvc1');
+    if (Platform.isAndroid) return 'mp4';
+    if (Platform.isWindows) return hevc ? 'mkv' : 'ts';
+    return hevc ? 'mp4' : 'ts';
+  }
+
   Future<void> _startRecording(Channel channel) async {
     if (_recordings.containsKey(channel.url)) return;
     final c = _pool[channel.url];
@@ -1648,9 +1673,10 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       return;
     }
     try {
+      final fmt = _resolveRecFormat(c);
       final path = await CaptureStore.recordingPath(channel.name, _captureDir,
-          part: 0, format: _recFormat);
-      final ok = c.startRecord(path, format: _recFormat);
+          part: 0, format: fmt);
+      final ok = c.startRecord(path, format: fmt);
       if (!ok) {
         _showTip(L10n.t('录制启动失败，请稍后重试'));
         return;
@@ -1661,7 +1687,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         controller: c,
         part: 0,
         path: path,
-        fmt: _recFormat,
+        fmt: fmt,
         startedAt: DateTime.now(),
       );
       _recordings[channel.url] = rec;
@@ -1778,7 +1804,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   Future<String?> _publishQuietly(String path, int part, [String? fmt]) async {
     final name = path.split(Platform.pathSeparator).last;
     try {
-      return await CaptureStore.publishRecording(path, name, fmt ?? _recFormat);
+      return await CaptureStore.publishRecording(path, name, fmt ?? 'ts');
     } catch (_) {
       return null;
     }
@@ -3580,6 +3606,11 @@ class _AdvancedSheetState extends State<_AdvancedSheet> {
                       spacing: 6,
                       runSpacing: 8,
                       children: [
+                        _pill(L10n.t('自动', 'Auto'), _recFormat == 'auto', () {
+                          _recFormat = 'auto';
+                          widget.onRecFormat('auto');
+                          if (mounted) setState(() {});
+                        }),
                         _pill('TS', _recFormat == 'ts', () {
                           _recFormat = 'ts';
                           widget.onRecFormat('ts');
@@ -3597,9 +3628,10 @@ class _AdvancedSheetState extends State<_AdvancedSheet> {
                         }),
                       ],
                     ),
-                    _hint(L10n.t('TS 为流复制、最省性能且断流也能播放；MP4 需等停止后才完整，兼容性最好')),
                     _hint(L10n.t(
-                        '部分 HEVC 编码的流（常见于监控设备的 FLV 源）在 Windows 上无法封装成 TS/MP4，此时会自动改用 MKV 并提示，画质不受影响')),
+                        '自动（推荐）：按画面编码选择——H.264 用 TS（监控设备通用），H.265 用 MP4（手机相册能出缩略图）；Windows 上 H.265 只能写 MKV，会自动用 MKV',
+                        'Auto (recommended): picks by codec — H.264 → TS, H.265 → MP4 (thumbnails in phone gallery); on Windows H.265 uses MKV')),
+                    _hint(L10n.t('手动选 TS/MP4 遇到不支持的流时，几秒内会自动改用 MKV 并提示，画质不受影响')),
 
                     const SizedBox(height: 16),
                     Text(L10n.t('分段时长'),
