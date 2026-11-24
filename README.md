@@ -35,7 +35,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 > 一句话：**IPTV / 直播 / 监控都能用**——H.265 + H.264 编码、RTSP / HTTP-FLV 协议的组合是优化重点；其它常见格式也能播（软件解码）。
 
 ![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows-blue)
-![Version](https://img.shields.io/badge/version-4.0.2-green)
+![Version](https://img.shields.io/badge/version-4.0.3-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 ---
@@ -69,7 +69,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 | Android 老设备（32 位） | `app-armeabi-v7a-release.apk` | 同上 |
 | Android 模拟器 / 特殊 x86 设备 | `app-x86_64-release.apk` | 同上 |
 | Windows 电脑（64 位） | `m3u_player-windows.zip` | 解压到电脑任意目录（建议 `D:\m3u_player`），双击里面的 exe 即可运行 |
-| Linux 电脑（x86_64 桌面，Ubuntu / Debian / 麒麟 / Deepin / Fedora / Arch 等） | `M3U_player_v4.0.2_linux-x64.tar.gz` | 解压后进入文件夹，双击 `m3u_player_fvp`（或终端执行 `./m3u_player_fvp`）；包内附《使用说明.txt》 |
+| Linux 电脑（x86_64 桌面，Ubuntu / Debian / 麒麟 / Deepin / Fedora / Arch 等） | `M3U_player_v4.0.3_linux-x64.tar.gz` | 解压后进入文件夹，双击 `m3u_player_fvp`（或终端执行 `./m3u_player_fvp`）；包内附《使用说明.txt》 |
 
 > ⚠️ Windows 版特别提醒：
 > - Windows 版以 **zip 压缩包**发布，下载后**先解压再运行**，解压出来的文件夹要保持完整（别把 exe 单独拷出来），双击里面的 `m3u_player_fvp.exe` 即可。
@@ -123,9 +123,10 @@ M3U 文件就是**记事本就能写**的文本文件（详见[第三节](#三�
 4. 录制是**流复制**（不重新编码），画质和原流完全一致，几乎不占 CPU。
 5. 封装格式默认 **自动**（推荐），默认 **30 分钟自动换一个文件**（分段），长时间录制不会产生一个巨大的文件。
    这两项都能在 控制面板 → **高级设置** 里改。
-   - **自动**：按画面实际编码选容器——**H.264 → TS**（监控设备/NVR 通用），**H.265 → MP4**
-     （手机相册、文件管理器能显示缩略图，也方便发微信）。Windows 上 H.265 只能写 MKV，会自动用 MKV。
-     录制前就读编码，不用等，也不会丢开头画面。
+   - **自动**：按画面实际编码选容器，录制前就读编码，不用等，也不会丢开头画面。
+     - **H.264 → TS**（Windows/Linux，监控设备/NVR 通用）；**Android 上 H.264 → MP4**（相册能出缩略图）。
+     - **H.265（HEVC）→ 一律 MKV**。Windows 和 Android 上 MDK 都写不进 TS/MP4
+       （只会得到一个二十来 KB、只有一帧的废文件），MKV 是唯一能正常录的容器。
    - 也可以手动锁定 **TS / MKV / MP4**。
 6. 文件位置：
    - Windows / Linux：软件所在目录下的 `recordings` 文件夹。
@@ -255,11 +256,11 @@ flutter build linux --release
 3. 打包发布（连同许可文件一起压缩）：
 
 ```bash
-mkdir -p /tmp/pkg/M3U_player_v4.0.2_linux-x64
-cp -a build/linux/x64/release/bundle/. /tmp/pkg/M3U_player_v4.0.2_linux-x64/
-cp LICENSE THIRD_PARTY_LICENSES.md /tmp/pkg/M3U_player_v4.0.2_linux-x64/
-cp -a LICENSES /tmp/pkg/M3U_player_v4.0.2_linux-x64/
-cd /tmp/pkg && tar -czf M3U_player_v4.0.2_linux-x64.tar.gz M3U_player_v4.0.2_linux-x64
+mkdir -p /tmp/pkg/M3U_player_v4.0.3_linux-x64
+cp -a build/linux/x64/release/bundle/. /tmp/pkg/M3U_player_v4.0.3_linux-x64/
+cp LICENSE THIRD_PARTY_LICENSES.md /tmp/pkg/M3U_player_v4.0.3_linux-x64/
+cp -a LICENSES /tmp/pkg/M3U_player_v4.0.3_linux-x64/
+cd /tmp/pkg && tar -czf M3U_player_v4.0.3_linux-x64.tar.gz M3U_player_v4.0.3_linux-x64
 ```
 
 > 说明：项目已包含 `linux/` 平台脚手架（`linux/runner`、`linux/flutter`、`CMakeLists.txt`），无需再执行 `flutter create --platforms=linux .`（真跑了会把 `.metadata` 里的 windows 条目冲掉，并顺手升级 `pubspec.lock` 的依赖版本）。
@@ -268,7 +269,7 @@ cd /tmp/pkg && tar -czf M3U_player_v4.0.2_linux-x64.tar.gz M3U_player_v4.0.2_lin
 
 **改频道清单** → 打开项目根目录或 exe 目录下的 `my_channels.m3u`（没有就新建一个），按[第三节](#三频道清单-m3u-怎么写)的格式写。也可以在软件里点"加载 M3U 文件"直接导入。
 
-**改软件版本号** → 打开 `pubspec.yaml`，找到 `version: 4.0.2+14` 这一行，改成你想要的（格式：`主版本.次版本.修订号+构建号`，例如 `4.1.0+13`）。改完重新构建即可生效。
+**改软件版本号** → 打开 `pubspec.yaml`，找到 `version: 4.0.3+15` 这一行，改成你想要的（格式：`主版本.次版本.修订号+构建号`，例如 `4.1.0+13`）。改完重新构建即可生效。
 
 **改默认参数（比如默认清晰度、默认加载几路）** → 打开 `lib/home_page.dart`，文件靠上位置的这些行就是默认值：
 
@@ -472,7 +473,8 @@ A：不能。Flutter 的 Linux 构建需要 Linux 系统上的 clang/GTK3 工具
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| **v4.0.2** | 2026-11 | 录制封装格式改为"自动"：按画面编码选容器（H.264→TS，H.265→MP4；Windows 上 H.265→MKV），录制前即判定，不再丢开头 5 秒；Android 统一输出 MP4，手机相册能显示缩略图；高级设置新增"自动（推荐）"选项，老配置一次性迁移 |
+| **v4.0.3** | 2026-11 | 按实测修正自动规则：H.265（HEVC）在所有平台一律输出 MKV（Android 上写 MP4 同样只有一帧，此前版本会出废文件）；H.264 桌面仍为 TS、Android 为 MP4 |
+| **v4.0.2** | 2026-11 | 录制封装格式改为"自动"：按画面编码选容器，录制前即判定，不再丢开头 5 秒；高级设置新增"自动（推荐）"选项，老配置一次性迁移 |
 | **v4.0.1** | 2026-11 | 单路录制（MDK 流复制、TS/MKV/MP4、默认 30 分钟分段、退出全屏需确认停止）；录制格式自检与自动降级（HEVC 编码的 FLV 源在 Windows 上无法写 TS/MP4 时自动改用 MKV）；截图与录制设置并入控制面板"高级设置"；界面语言默认跟随系统可手动切换 |
 | **v4.0.0** | 2026-09 | Windows 版完善：ESC/右键退出全屏、滚轮翻页、配置持久化到 exe 目录、配置合并写入修复；控制面板"关于"；分 ABI 构建；遥控器焦点管理修复；Linux 桌面版；单路截图（PNG）+ 单元格右键/长按菜单 + 控制面板"高级设置"（语言与截图保存位置） |
 | v3.9.0 | 2026-09 | 稳定版：所有参数可调、完整操作说明、全屏沉浸式 |
