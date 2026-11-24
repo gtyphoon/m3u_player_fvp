@@ -254,7 +254,14 @@ class NativePlayerController {
     final p = _player;
     if (p == null || _disposed) return false;
     try {
-      p.record(to: path, format: format);
+      // MDK 的 format 参数是 ffmpeg muxer 名，不是文件后缀：
+      // ts -> mpegts，mkv -> matroska，mp4 -> mp4
+      final fmt = switch (format) {
+        'ts' => 'mpegts',
+        'mkv' => 'matroska',
+        _ => 'mp4',
+      };
+      p.record(to: path, format: fmt);
       return true;
     } catch (_) {
       return false;
