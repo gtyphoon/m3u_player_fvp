@@ -1,6 +1,6 @@
 ﻿# M3U 多路监控播放器（M3U Player）
 
-一个把多路视频流**放在一个屏幕上看**的多画面播放器。播 **IPTV、直播、监控摄像头**都行（RTSP / HTTP-FLV / HLS 等任意 M3U 视频源），支持 **Android 手机 / Android 电视盒 / Windows 电脑**，一套代码、三种设备都能用。
+一个把多路视频流**放在一个屏幕上看**的多画面播放器。播 **IPTV、直播、监控摄像头**都行（RTSP / HTTP-FLV / HLS 等任意 M3U 视频源），支持 **Android 手机 / Android 电视盒 / Windows 电脑 / Linux 电脑（x86_64 桌面）**，一套代码、多种设备都能用。
 
 > 🎯 **对哪种视频流支持最好？** 本软件专门为 **H.265/HEVC 编码**的视频流做了优化——这是现在绝大多数监控摄像头和不少 IPTV 源默认的输出格式（尤其是 **HEVC-in-FLV** 封装）。对这种流，软件支持**硬件解码**（用手机/电视/电脑自带的视频芯片解码，而不是靠 CPU 硬算），做到**多路同时播放依然清晰流畅、不卡顿不发热**。当然，常见的 H.264 编码流也完全支持。
 
@@ -69,6 +69,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 | Android 老设备（32 位） | `app-armeabi-v7a-release.apk` | 同上 |
 | Android 模拟器 / 特殊 x86 设备 | `app-x86_64-release.apk` | 同上 |
 | Windows 电脑（64 位） | `m3u_player-windows.zip` | 解压到电脑任意目录（建议 `D:\m3u_player`），双击里面的 exe 即可运行 |
+| Linux 电脑（x86_64 桌面，Ubuntu / Debian / 麒麟 / Deepin / Fedora / Arch 等） | `M3U_player_v4.0.0_linux-x64.tar.gz` | 解压后进入文件夹，双击 `m3u_player_fvp`（或终端执行 `./m3u_player_fvp`）；包内附《使用说明.txt》 |
 
 > ⚠️ Windows 版特别提醒：
 > - Windows 版以 **zip 压缩包**发布，下载后**先解压再运行**，解压出来的文件夹要保持完整（别把 exe 单独拷出来），双击里面的 `m3u_player_fvp.exe` 即可。
@@ -76,6 +77,12 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 > - 你的设置会保存在 exe 旁边的 `config.ini` 文件里，**升级版本时请保留这个文件**（或备份它），这样你的参数不会丢。
 
 > ⚠️ Android 版系统要求：最低支持 **Android 7.0（2016 年发布）及以上**（API 24）。安卓 6.0 及以下的手机、电视盒、电视**无法安装**。查看设备系统版本：设置 → 关于本机 → Android 版本。
+
+> ⚠️ Linux 版特别提醒：
+> - 以 **tar.gz 压缩包**发布，解压后**整个文件夹要完整**（`data/`、`lib/` 必须和主程序 `m3u_player_fvp` 放在一起）。
+> - 依赖 GTK3 运行库，绝大多数桌面发行版已自带；若启动提示缺库，Ubuntu/Debian 系执行 `sudo apt install libgtk-3-0 libblkid1 liblzma5`，Fedora 系执行 `sudo dnf install gtk3 libblkid lzma`。
+> - 若双击无反应，在文件夹内开终端执行 `./m3u_player_fvp`；提示权限不足时先 `chmod +x m3u_player_fvp`。
+> - 设置同样保存在主程序旁边的 `config.ini`，升级时请保留。
 
 ### 2. 准备你的频道清单（M3U 文件）
 
@@ -190,6 +197,41 @@ flutter build apk --release --split-per-abi
 | `app-x86_64-release.apk` | 电脑模拟器 / 少数 x86 芯片设备 |
 
 > ⚠️ 小知识：为什么打 3 个包？因为 Android 设备用的芯片（CPU）分好几种，每种要不同的包才能跑得又快又稳。Flutter 项目里**不要**在 `android/app/build.gradle.kts` 中写 `ndk.abiFilters`，否则会和 `--split-per-abi` 冲突导致构建失败。
+
+**构建 Linux 版**（必须在 Linux 系统上构建，Windows 上不能直接打 Linux 包）：
+
+1. 先装编译依赖（Ubuntu / Debian 为例，只需一次）：
+
+```bash
+sudo apt update
+sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+```
+
+2. 在项目根目录构建：
+
+```bash
+flutter build linux --release
+```
+
+产物在：`build/linux/x64/release/bundle/`，里面必须包含三项：
+
+| 内容 | 说明 |
+|------|------|
+| `m3u_player_fvp` | 主程序（可执行文件） |
+| `data/` | 界面资源、字体等 |
+| `lib/` | 依赖库（`libapp.so`、`libflutter_linux_gtk.so`、`libfvp.so`、`libmdk*.so`、`libffmpeg.so.9`、`libc++.so.1` 等） |
+
+3. 打包发布（连同许可文件一起压缩）：
+
+```bash
+mkdir -p /tmp/pkg/M3U_player_v4.0.0_linux-x64
+cp -a build/linux/x64/release/bundle/. /tmp/pkg/M3U_player_v4.0.0_linux-x64/
+cp LICENSE THIRD_PARTY_LICENSES.md /tmp/pkg/M3U_player_v4.0.0_linux-x64/
+cp -a LICENSES /tmp/pkg/M3U_player_v4.0.0_linux-x64/
+cd /tmp/pkg && tar -czf M3U_player_v4.0.0_linux-x64.tar.gz M3U_player_v4.0.0_linux-x64
+```
+
+> 说明：项目已包含 `linux/` 平台脚手架（`linux/runner`、`linux/flutter`、`CMakeLists.txt`），无需再执行 `flutter create --platforms=linux .`（真跑了会把 `.metadata` 里的 windows 条目冲掉，并顺手升级 `pubspec.lock` 的依赖版本）。
 
 ### 第 6 步：怎么修改（按你想改的东西找）
 
@@ -319,13 +361,17 @@ nobuffer=true
 ```
 m3u_player_fvp/
 ├── lib/                          ← 软件的核心代码（主要改这里）
-│   ├── main.dart                 ← 程序入口（启动、屏幕方向策略：Windows 默认横屏）
+│   ├── main.dart                 ← 程序入口（启动、屏幕方向策略：电脑版 Windows/Linux 默认横屏）
 │   ├── home_page.dart            ← 主页面：画面网格、全屏、控制面板、操作说明、关于
 │   ├── m3u_parser.dart           ← 解析 M3U 清单（分组、码流、地址提取）
-│   ├── native_io.dart            ← 文件选择、配置保存/读取
+│   ├── native_io.dart            ← 文件选择、配置保存/读取（电脑端直接读写程序目录，不走安卓原生通道）
 │   └── native_player.dart        ← 播放内核封装（硬解/软解、超时参数）
 ├── android/                      ← Android 工程文件（一般不用动）
 ├── windows/                      ← Windows 工程文件（一般不用动）
+├── linux/                        ← Linux 工程文件（一般不用动，用于 flutter build linux）
+│   ├── CMakeLists.txt            ← Linux 构建配置（程序名、版本号在这里）
+│   ├── runner/                   ← Linux 窗口入口（窗口标题、默认尺寸）
+│   └── flutter/                  ← Flutter 引擎与插件注册（构建时自动生成）
 ├── test/
 │   └── widget_test.dart          ← 自动化测试
 ├── pubspec.yaml                  ← 项目"身份证"：版本号、依赖库清单
@@ -379,6 +425,15 @@ A：确认设备是否支持遥控器输入；在控制面板检查"电视模式
 
 **Q7：老电视/老手机提示"解析包错误"或安装不上？**
 A：本软件要求 **Android 7.0（API 24）及以上**，Android 6.0 及以下的设备不支持。请先在"设置 → 关于本机 → Android 版本"确认系统版本；如果设备系统太低，只能换设备或用 Windows 版。
+
+**Q8：Linux 上双击没反应 / 终端报"Permission denied"？**
+A：先给主程序执行权限：`chmod +x m3u_player_fvp`，再双击或执行 `./m3u_player_fvp`。如果提示缺少库，Ubuntu/Debian 系执行 `sudo apt install libgtk-3-0 libblkid1 liblzma5`，Fedora 系执行 `sudo dnf install gtk3 libblkid lzma`。
+
+**Q9：Linux 版启动后设置存不住 / 加载 M3U 没反应？**
+A：确认 `config.ini` 写在主程序所在目录（`ls` 应能看到 `m3u_player_fvp`、`data/`、`lib/`、`config.ini` 同一层）。若主程序被单独挪走或 `lib/`、`data/` 缺失，程序无法正常启动或无法保存配置。
+
+**Q10：能在 Windows 上打 Linux 包吗？**
+A：不能。Flutter 的 Linux 构建需要 Linux 系统上的 clang/GTK3 工具链。请在 Linux 机器（或 Linux 虚拟机 / WSL2 + 桌面依赖）里按[第 5 步](#第-5-步构建正式安装包发布用)的 Linux 部分构建。
 
 ---
 
