@@ -80,6 +80,27 @@ class L10n {
     '知道了': 'Got it',
     '取消': 'Cancel',
 
+    // ---------- 截图 / 高级设置 ----------
+    '截图': 'Snapshot',
+    '全屏': 'Fullscreen',
+    '高级设置': 'Advanced',
+    '截图与录制': 'Snapshots & Recording',
+    '截图保存位置': 'Snapshot folder',
+    '更改目录': 'Change folder',
+    '恢复默认': 'Use default',
+    '打开文件夹': 'Open folder',
+    '下载': 'Downloads',
+    '截图已保存': 'Screenshot saved',
+    '截图失败，可能暂无画面': 'Snapshot failed — no picture yet',
+    '暂无画面，无法截图': 'No picture to capture',
+    '默认跟随系统语言，切换后立即生效并自动保存':
+        'Follows system language by default; changes apply instantly and are saved.',
+    '默认保存在软件所在目录，留空即使用默认':
+        'Default is the app folder; leave it unset to keep the default.',
+    'Android 上直接保存到"下载/M3U播放器"，可在文件管理器查看':
+        'On Android files go to Downloads/M3U播放器 and are visible in the file manager.',
+    '完成': 'Done',
+
     // ---------- 加载与提示 ----------
     '上次选择': 'Last loaded',
     '文件内容为空': 'File is empty',

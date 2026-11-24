@@ -8,6 +8,7 @@ import 'package:flutter/gestures.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'native_player.dart';
 import 'native_io.dart';
+import 'capture_store.dart';
 
 import 'm3u_parser.dart';
 import 'l10n.dart';
@@ -21,6 +22,15 @@ const String kAppVersion = '4.0.0';
 const String kAppBuild = '12';
 const String kAppAuthor = 'gtyphoon';
 const String kAppLicense = 'MIT License';
+
+/// 截图失败提示文案（错误码 → 可操作说明），网格与全屏页共用
+String captureErrorText(String? code) => switch (code) {
+      'PERMISSION_DENIED' => L10n.t(
+          '需要存储权限才能保存截图，请在系统设置里允许本软件使用存储',
+          'Storage permission is required to save screenshots. Allow it in system settings.'),
+      'no_frame' => L10n.t('截图失败，可能暂无画面'),
+      _ => L10n.t('截图失败，请检查保存目录'),
+    };
 
 /// 面板形态：auto=自动适配（竖屏底部/宽屏左侧），left=强制左侧抽屉，bottom=强制底部
 enum PanelStyle { auto, left, bottom }
@@ -78,6 +88,9 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   // 方向锁定：null=自动，landscape=强制横屏，portrait=强制竖屏
   String? _orientationLock = kIsDesktop ? 'landscape' : 'portrait';
+
+  // 截图保存目录（桌面端可自定义；空=程序所在目录）
+  String? _captureDir;
 
   // 全屏播放的频道
   Channel? _fullscreenChannel;
@@ -242,6 +255,10 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     _heartbeatTimeout = await NativeIO.prefsGetInt('heartbeat_timeout') ?? 5;
     _bufferSeconds = await NativeIO.prefsGetInt('buffer_seconds') ?? 0;
     _reconnectDelayMax = await NativeIO.prefsGetInt('reconnect_delay_max') ?? 7;
+    final captureDir = await NativeIO.prefsGetString('capture_dir');
+    _captureDir = (captureDir == null || captureDir.trim().isEmpty)
+        ? null
+        : captureDir.trim();
     if (mounted) setState(() {});
   }
 
@@ -266,6 +283,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       'heartbeat_timeout': '$_heartbeatTimeout',
       'buffer_seconds': '$_bufferSeconds',
       'reconnect_delay_max': '$_reconnectDelayMax',
+      'capture_dir': _captureDir ?? '',
     });
   }
 
@@ -557,6 +575,13 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   void _setLang(String key) {
     L10n.lang = L10n.langFrom(key);
     NativeIO.prefsSetString('lang', key);
+    if (mounted) setState(() {});
+  }
+
+  /// 截图保存目录（高级设置里改，null=程序所在目录）
+  void _setCaptureDir(String? dir) {
+    _captureDir = (dir == null || dir.trim().isEmpty) ? null : dir.trim();
+    _savePrefs();
     if (mounted) setState(() {});
   }
 
@@ -1375,6 +1400,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             focused: _tvEffective && i == _gridFocusIndex,
             isSwitching: _isSwitching,
             onTap: () => _openFullscreen(ch),
+            onMenu: (pos) => _showCellMenu(ch, pos),
           );
         },
       ),
@@ -1446,6 +1472,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             channel: channel,
             controller: c,
             status: _statusOf(channel.url),
+            onSnapshot: () => _captureScreenshot(channel),
             onClosed: () {
               c?.setVolume(0);
               _applyOrientationLock();
@@ -1456,6 +1483,69 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       // 返回后保持原画面继续播放（同一 controller，无需重连）
       _fullscreenChannel = null;
     });
+  }
+
+  /// 截取一路画面存成 PNG（设置里可指定桌面端保存目录）。
+  /// 返回 path（成功）或 error 错误码（no_frame / PERMISSION_DENIED / SAVE_FAILED）
+  Future<({String? path, String? error})> _captureScreenshot(
+      Channel channel) async {
+    final c = _pool[channel.url];
+    if (c == null || !c.value.hasFrame) return (path: null, error: 'no_frame');
+    try {
+      final png = await c.snapshotPng();
+      if (png == null) return (path: null, error: 'no_frame');
+      final path = await CaptureStore.saveScreenshot(png, channel.name,
+          customDir: _captureDir);
+      return (path: path, error: null);
+    } on PlatformException catch (e) {
+      return (path: null, error: e.code);
+    } catch (_) {
+      return (path: null, error: 'SAVE_FAILED');
+    }
+  }
+
+  /// 截图失败提示文案（按错误码给出可操作的说明）
+  String _captureErrorText(String? code) => captureErrorText(code);
+
+  /// 网格右键（桌面）/ 长按（手机）菜单
+  Future<void> _showCellMenu(Channel channel, Offset globalPos) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final size = overlay?.size ?? MediaQuery.of(context).size;
+    final pos = RelativeRect.fromLTRB(
+      globalPos.dx,
+      globalPos.dy,
+      max(0, size.width - globalPos.dx),
+      max(0, size.height - globalPos.dy),
+    );
+    final sel = await showMenu<String>(
+      context: context,
+      position: pos,
+      color: const Color(0xFF1E1E1E),
+      items: [
+        PopupMenuItem<String>(
+          value: 'full',
+          height: 38,
+          child: Text(L10n.t('全屏'), style: const TextStyle(fontSize: 13)),
+        ),
+        PopupMenuItem<String>(
+          value: 'shot',
+          height: 38,
+          child: Text(L10n.t('截图'), style: const TextStyle(fontSize: 13)),
+        ),
+      ],
+    );
+    if (!mounted || sel == null) return;
+    if (sel == 'full') {
+      _openFullscreen(channel);
+    } else if (sel == 'shot') {
+      final r = await _captureScreenshot(channel);
+      if (!mounted) return;
+      _showTip(r.path != null
+          ? L10n.t('截图已保存：${r.path}', 'Screenshot saved: {path}',
+              {'path': r.path})
+          : _captureErrorText(r.error));
+    }
   }
 
   // ---------- 面板容器 ----------
@@ -1492,6 +1582,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             onStyle: _setPanelStyle,
             onTvMode: _setTvMode,
             onLang: _setLang,
+            captureDir: _captureDir,
+            onCaptureDir: _setCaptureDir,
             tvOverride: _tvOverride,
             onImport: _importM3U,
             videoDecoder: _videoDecoder,
@@ -1558,6 +1650,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             onStyle: _setPanelStyle,
             onTvMode: _setTvMode,
             onLang: _setLang,
+            captureDir: _captureDir,
+            onCaptureDir: _setCaptureDir,
             tvOverride: _tvOverride,
             onImport: _importM3U,
             videoDecoder: _videoDecoder,
@@ -1985,6 +2079,9 @@ class _PanelBody extends StatefulWidget {
   final String? tvOverride;
   final ValueChanged<String> onTvMode;
   final ValueChanged<String> onLang;
+  // 高级设置：截图/录制保存目录（null=程序所在目录）
+  final String? captureDir;
+  final ValueChanged<String?> onCaptureDir;
   final ValueChanged<int> onPage;
   final ValueChanged<PanelStyle> onStyle;
   final VoidCallback onImport;
@@ -2034,6 +2131,8 @@ class _PanelBody extends StatefulWidget {
     required this.tvOverride,
     required this.onTvMode,
     required this.onLang,
+    required this.captureDir,
+    required this.onCaptureDir,
     required this.onPage,
     required this.onStyle,
     required this.onImport,
@@ -2235,18 +2334,7 @@ class _PanelBodyState extends State<_PanelBody> {
                 ),
                 const SizedBox(height: 10),
                 const Divider(color: Colors.white24),
-                _label(L10n.t('界面语言')),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 8,
-                  children: [
-                    _btn(L10n.t('跟随系统'), L10n.langKey() == 'system', () => widget.onLang('system')),
-                    _btn('中文', L10n.langKey() == 'zh', () => widget.onLang('zh')),
-                    _btn('English', L10n.langKey() == 'en', () => widget.onLang('en')),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                const Divider(color: Colors.white24),
+                // 界面语言已移到"高级设置"页，与截图/录制设置统一收纳
                 _label(L10n.t('播放器参数（调完翻页生效，自动保存）')),
                 _label(L10n.t('解码方式')),
                 Wrap(
@@ -2338,6 +2426,10 @@ class _PanelBodyState extends State<_PanelBody> {
                 ),
                 const SizedBox(height: 10),
                 Center(
+                  child: _btn(L10n.t('高级设置'), false, _openAdvanced),
+                ),
+                const SizedBox(height: 10),
+                Center(
                   child: _btn(L10n.t('操作说明'), false,
                       () => showHelpDialog(context)),
                 ),
@@ -2355,6 +2447,19 @@ class _PanelBodyState extends State<_PanelBody> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 高级设置页：界面语言 + 截图/录制保存位置
+  Future<void> _openAdvanced() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _AdvancedSheet(
+        captureDir: widget.captureDir,
+        onCaptureDir: widget.onCaptureDir,
+        langKey: L10n.langKey(),
+        onLang: widget.onLang,
+      ),
     );
   }
 
@@ -2447,6 +2552,8 @@ class _MonitorCell extends StatefulWidget {
   final bool focused;
   final bool isSwitching;
   final VoidCallback onTap;
+  /// 右键（桌面）/ 长按（手机）呼出菜单，传入按下的全局坐标
+  final void Function(Offset globalPos)? onMenu;
 
   const _MonitorCell({
     super.key,
@@ -2457,6 +2564,7 @@ class _MonitorCell extends StatefulWidget {
     required this.focused,
     required this.isSwitching,
     required this.onTap,
+    this.onMenu,
   });
 
   @override
@@ -2474,6 +2582,9 @@ class _MonitorCellState extends State<_MonitorCell> {
     final focused = widget.focused;
     return GestureDetector(
       onDoubleTap: widget.onTap, // 双击进入全屏（单击不响应，避免误触）
+      // 右键（Windows/Linux 鼠标）/ 长按（Android）呼出操作菜单
+      onSecondaryTapDown: (d) => widget.onMenu?.call(d.globalPosition),
+      onLongPressStart: (d) => widget.onMenu?.call(d.globalPosition),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.black,
@@ -2540,12 +2651,15 @@ class _FullscreenPage extends StatefulWidget {
   final NativePlayerController? controller;
   final String status;
   final VoidCallback onClosed;
+  /// 截图：返回 path（成功）或 error 错误码（失败）
+  final Future<({String? path, String? error})> Function()? onSnapshot;
 
   const _FullscreenPage({
     required this.channel,
     required this.controller,
     required this.status,
     required this.onClosed,
+    this.onSnapshot,
   });
 
   @override
@@ -2591,6 +2705,24 @@ class _FullscreenPageState extends State<_FullscreenPage> {
     _lock = _lock == 'landscape' ? 'portrait' : 'landscape';
     await _applyLock(_lock);
     if (mounted) setState(() {});
+  }
+
+  /// 角落截图按钮：点了才截，平时几乎不可见（低透明度小圆钮）
+  Future<void> _onSnapshotTap() async {
+    final fn = widget.onSnapshot;
+    if (fn == null) return;
+    final r = await fn();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(r.path != null
+            ? L10n.t('截图已保存：${r.path}', 'Screenshot saved: {path}',
+                {'path': r.path})
+            : captureErrorText(r.error)),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
   }
 
   @override
@@ -2645,6 +2777,30 @@ class _FullscreenPageState extends State<_FullscreenPage> {
                 ),
               ),
             // 全屏模式不显示标题和提示，保持纯净画面
+            // 仅在右上角放一个低调的截图按钮（半透明、小尺寸）
+            if (widget.onSnapshot != null)
+              Positioned(
+                right: 10,
+                top: 10 + safeTop,
+                child: Opacity(
+                  opacity: 0.38,
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _onSnapshotTap,
+                      child: Padding(
+                        padding: const EdgeInsets.all(7),
+                        child: Icon(Icons.camera_alt_outlined,
+                            size: 17,
+                            color: Colors.white70,
+                            semanticLabel: L10n.t('截图')),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -2759,6 +2915,195 @@ class _TvFileDialogState extends State<_TvFileDialog> {
               style: TextStyle(color: Colors.lightBlueAccent, fontSize: 14)),
         ),
       ],
+    );
+  }
+}
+
+/// 高级设置页（控制面板内弹出）：界面语言 + 截图/录制保存位置
+///
+/// 语言与截图/录制设置集中放在这里，主面板保持精简。
+class _AdvancedSheet extends StatefulWidget {
+  final String? captureDir;
+  final ValueChanged<String?> onCaptureDir;
+  final String langKey;
+  final ValueChanged<String> onLang;
+
+  const _AdvancedSheet({
+    required this.captureDir,
+    required this.onCaptureDir,
+    required this.langKey,
+    required this.onLang,
+  });
+
+  @override
+  State<_AdvancedSheet> createState() => _AdvancedSheetState();
+}
+
+class _AdvancedSheetState extends State<_AdvancedSheet> {
+  late String _lang;
+  late String? _dir;
+  String? _appDir;
+
+  @override
+  void initState() {
+    super.initState();
+    _lang = widget.langKey;
+    _dir = widget.captureDir;
+    NativeIO.getAppDir().then((d) {
+      if (mounted) setState(() => _appDir = d);
+    });
+  }
+
+  Widget _sec(String text) => Padding(
+        padding: const EdgeInsets.only(top: 4, bottom: 8),
+        child: Text(text,
+            style: const TextStyle(
+                fontSize: 13,
+                color: Colors.white70,
+                fontWeight: FontWeight.w600)),
+      );
+
+  Widget _hint(String text) => Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(text,
+            style: const TextStyle(fontSize: 11, color: Colors.white38)),
+      );
+
+  Widget _pill(String label, bool selected, VoidCallback onTap) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? Colors.lightBlueAccent.withValues(alpha: .35)
+                : Colors.white10,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(label,
+              style: const TextStyle(color: Colors.white, fontSize: 13)),
+        ),
+      );
+
+  void _setLang(String key) {
+    _lang = key;
+    widget.onLang(key);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickDir() async {
+    final d = await NativeIO.pickDirectory();
+    if (d == null || d.trim().isEmpty) return;
+    _dir = d.trim();
+    widget.onCaptureDir(_dir);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openDir() async {
+    final base = _dir ?? _appDir;
+    if (base == null) return;
+    await NativeIO.openDirectory('$base${Platform.pathSeparator}screenshots');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxH = MediaQuery.of(context).size.height * 0.75;
+    final baseText = _dir ?? _appDir ?? '…';
+    return Dialog(
+      backgroundColor: Colors.blueGrey.shade900,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 460, maxHeight: maxH),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 8, 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.tune, size: 18, color: Colors.lightBlueAccent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(L10n.t('高级设置'),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, size: 18, color: Colors.white54),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white24),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _sec(L10n.t('界面语言')),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 8,
+                      children: [
+                        _pill(L10n.t('跟随系统'), _lang == 'system',
+                            () => _setLang('system')),
+                        _pill('中文', _lang == 'zh', () => _setLang('zh')),
+                        _pill('English', _lang == 'en', () => _setLang('en')),
+                      ],
+                    ),
+                    _hint(L10n.t('默认跟随系统语言，切换后立即生效并自动保存')),
+
+                    const SizedBox(height: 18),
+                    const Divider(color: Colors.white24),
+                    _sec(L10n.t('截图与录制')),
+                    Text(L10n.t('截图保存位置'),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.white54)),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      kIsDesktop
+                          ? '$baseText${Platform.pathSeparator}screenshots'
+                          : '${L10n.t('下载')}/M3U播放器/screenshots',
+                      style: const TextStyle(fontSize: 12, color: Colors.white),
+                    ),
+                    if (kIsDesktop) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 8,
+                        children: [
+                          _pill(L10n.t('更改目录'), false, _pickDir),
+                          _pill(L10n.t('恢复默认'), _dir == null, () {
+                            _dir = null;
+                            widget.onCaptureDir(null);
+                            if (mounted) setState(() {});
+                          }),
+                          _pill(L10n.t('打开文件夹'), false, _openDir),
+                        ],
+                      ),
+                      _hint(L10n.t('默认保存在软件所在目录，留空即使用默认')),
+                    ] else
+                      _hint(L10n.t('Android 上直接保存到"下载/M3U播放器"，可在文件管理器查看')),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white24),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _pill(L10n.t('完成'), true,
+                    () => Navigator.of(context).pop()),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

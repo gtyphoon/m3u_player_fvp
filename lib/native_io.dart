@@ -123,4 +123,28 @@ class NativeIO {
   static Future<void> prefsSetBool(String key, bool value) async {
     await prefsSetString(key, value.toString());
   }
+
+  /// 桌面：选择文件夹（截图 / 录制保存位置），取消返回 null
+  static Future<String?> pickDirectory() async {
+    if (!kIsDesktop) return null;
+    try {
+      return await FilePicker.platform.getDirectoryPath();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 桌面：在系统文件管理器里打开目录（Windows 资源管理器 / Linux 文件管理器）
+  static Future<void> openDirectory(String path) async {
+    if (!kIsDesktop) return;
+    try {
+      final dir = Directory(path);
+      if (!await dir.exists()) await dir.create(recursive: true);
+      if (Platform.isWindows) {
+        await Process.run('explorer.exe', [dir.path]);
+      } else {
+        await Process.run('xdg-open', [dir.path]);
+      }
+    } catch (_) {}
+  }
 }

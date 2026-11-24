@@ -1,16 +1,24 @@
 ﻿package com.yeyjk.flv_hevc_player
 
 import android.app.PictureInPictureParams
+import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Rational
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.BufferedReader
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStreamReader
 
 class MainActivity : FlutterActivity() {
@@ -96,6 +104,19 @@ class MainActivity : FlutterActivity() {
                     android.util.Log.d("M3UPREFS", "prefsSet done $key type=$type")
                     result.success(null)
                 }
+                // 截图/录制落盘：直接存到公共"下载/M3U播放器/子目录"
+                // API 29+ 走 MediaStore（免权限），API 24~28 需要存储权限
+                "saveCaptureFile" -> {
+                    val name = call.argument<String>("name")
+                    val subdir = call.argument<String>("subdir") ?: ""
+                    val bytes = call.argument<ByteArray>("bytes")
+                    val mime = call.argument<String>("mime") ?: "application/octet-stream"
+                    if (name == null || bytes == null) {
+                        result.error("BAD_ARGS", "name/bytes is null", null)
+                    } else {
+                        saveCaptureAsync(name, subdir, bytes, mime, result)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -147,6 +168,122 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ---------- 截图 / 录制保存到公共"下载"目录 ----------
+
+    private data class PendingSave(
+        val name: String,
+        val subdir: String,
+        val bytes: ByteArray,
+        val mime: String,
+        val result: MethodChannel.Result
+    )
+
+    private var pendingSave: PendingSave? = null
+
+    private fun saveCaptureAsync(
+        name: String,
+        subdir: String,
+        bytes: ByteArray,
+        mime: String,
+        result: MethodChannel.Result
+    ) {
+        // API 24~28 写公共目录需要存储权限；没有就先申请，授权后继续写
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingSave = PendingSave(name, subdir, bytes, mime, result)
+            requestPermissions(
+                arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                REQUEST_WRITE_STORAGE
+            )
+            return
+        }
+        Thread {
+            try {
+                val path = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    saveToDownloads(name, subdir, bytes, mime)
+                } else {
+                    saveLegacy(name, subdir, bytes)
+                }
+                runOnUiThread { result.success(path) }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    result.error("SAVE_FAILED", e.message ?: "save failed", null)
+                }
+            }
+        }.start()
+    }
+
+    /** API 29+：MediaStore Downloads（免权限，卸载应用后文件仍在下载目录） */
+    private fun saveToDownloads(
+        name: String,
+        subdir: String,
+        bytes: ByteArray,
+        mime: String
+    ): String {
+        val relative = "Download/${CAPTURE_ROOT}" +
+                (if (subdir.isEmpty()) "" else "/$subdir")
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, mime)
+            put(MediaStore.Downloads.RELATIVE_PATH, relative)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+        ) ?: throw IOException("MediaStore insert failed")
+        try {
+            contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                ?: throw IOException("openOutputStream failed")
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            try {
+                contentResolver.delete(uri, null, null)
+            } catch (_: Exception) {
+            }
+            throw e
+        }
+        return "$relative/$name"
+    }
+
+    /** API 24~28：直接写外部存储公共下载目录（已获存储权限） */
+    private fun saveLegacy(name: String, subdir: String, bytes: ByteArray): String {
+        val root = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            CAPTURE_ROOT
+        )
+        val dir = if (subdir.isEmpty()) root else File(root, subdir)
+        if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
+            throw IOException("mkdirs failed: ${dir.absolutePath}")
+        }
+        val f = File(dir, name)
+        FileOutputStream(f).use { it.write(bytes) }
+        MediaScannerConnection.scanFile(this, arrayOf(f.absolutePath), null, null)
+        return f.absolutePath
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_WRITE_STORAGE) {
+            val p = pendingSave ?: return
+            pendingSave = null
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                saveCaptureAsync(p.name, p.subdir, p.bytes, p.mime, p.result)
+            } else {
+                p.result.error("PERMISSION_DENIED", "storage permission denied", null)
+            }
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_PICK_M3U) {
@@ -170,7 +307,10 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val REQUEST_PICK_M3U = 1001
+        private const val REQUEST_WRITE_STORAGE = 1002
         private const val PREFS = "m3u_prefs"
+        // 下载目录下的软件子目录（与 Dart 端 CaptureStore.androidRoot 保持一致）
+        private const val CAPTURE_ROOT = "M3U播放器"
     }
 }
 
