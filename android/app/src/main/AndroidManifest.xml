@@ -7,7 +7,7 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <!-- 自写内核不依赖 lifecycle API，强制放行以支持 Android 6（minSdk 23）电视 -->
     <application
-        android:label="M3U播放器"
+        android:label="@string/app_name"
         android:name="${applicationName}"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">

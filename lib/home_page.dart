@@ -10,6 +10,7 @@ import 'native_player.dart';
 import 'native_io.dart';
 
 import 'm3u_parser.dart';
+import 'l10n.dart';
 
 /// 布局档位：格子数
 const List<int> kLayouts = [1, 2, 4, 5, 6, 7, 8, 16];
@@ -147,7 +148,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       if (await f.exists()) content = await f.readAsString();
     } catch (_) {}
     if (content != null) {
-      _applyM3U(content, '上次选择');
+      _applyM3U(content, L10n.t('上次选择'));
     } else if (mounted) {
       setState(() => _checking = false);
     }
@@ -168,6 +169,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   /// 恢复上次保存的面板配置（布局/列行/预加载/分组/码流/面板样式/方向）
   Future<void> _restorePrefs() async {
     try {
+      final langKey = await NativeIO.prefsGetString('lang') ?? 'system';
+      L10n.lang = L10n.langFrom(langKey);
       final layout = await NativeIO.prefsGetInt('layout') ?? 2;
       final columns = await NativeIO.prefsGetInt('columns') ?? 0;
       final rows = await NativeIO.prefsGetInt('rows') ?? 0;
@@ -271,12 +274,12 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       final file = File(path);
       final content = await file.readAsString();
       if (content.trim().isEmpty) {
-        _showTip('文件内容为空');
+        _showTip(L10n.t('文件内容为空'));
         return;
       }
       final channels = parseM3U(content);
       if (channels.isEmpty) {
-        _showTip('未识别到有效频道，请检查 M3U 格式');
+        _showTip(L10n.t('未识别到有效频道，请检查 M3U 格式'));
         return;
       }
       // 持久化到应用文档目录，下次启动自动加载
@@ -285,11 +288,11 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         final f = File('$dir/my_channels.m3u');
         await f.writeAsString(content, flush: true);
       } catch (e) {
-        _showTip('列表已加载，但保存失败: $e');
+        _showTip(L10n.t('列表已加载，但保存失败: $e', 'List loaded, but save failed: {e}', {'e': e}));
       }
       _applyM3U(content, file.path);
     } catch (e) {
-      _showTip('加载 M3U 文件失败: $e');
+      _showTip(L10n.t('加载 M3U 文件失败: $e', 'Failed to load M3U file: {e}', {'e': e}));
     }
   }
 
@@ -306,17 +309,17 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         content = await NativeIO.pickM3U();
         if (content == null) return; // 用户取消
       } catch (e) {
-        _showTip('无法打开文件选择器: $e');
+        _showTip(L10n.t('无法打开文件选择器: $e', 'Cannot open file picker: {e}', {'e': e}));
         return;
       }
       try {
         if (content.trim().isEmpty) {
-          _showTip('文件内容为空');
+          _showTip(L10n.t('文件内容为空'));
           return;
         }
         final channels = parseM3U(content);
         if (channels.isEmpty) {
-          _showTip('未识别到有效频道，请检查 M3U 格式');
+          _showTip(L10n.t('未识别到有效频道，请检查 M3U 格式'));
           return;
         }
         // 持久化到应用文档目录，下次启动自动加载
@@ -325,11 +328,11 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
           final f = File('$dir/my_channels.m3u');
           await f.writeAsString(content, flush: true);
         } catch (e) {
-          _showTip('列表已加载，但保存失败: $e');
+          _showTip(L10n.t('列表已加载，但保存失败: $e', 'List loaded, but save failed: {e}', {'e': e}));
         }
         _applyM3U(content, 'M3U');
       } catch (e) {
-        _showTip('读取文件失败: $e');
+        _showTip(L10n.t('读取文件失败: $e', 'Failed to read file: {e}', {'e': e}));
       }
       return;
     }
@@ -341,12 +344,12 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       granted = await _permChannel.invokeMethod<bool>('requestStorage') ?? false;
     } catch (_) {}
     if (!granted) {
-      _showTip('需要存储权限才能读取 M3U 文件');
+      _showTip(L10n.t('需要存储权限才能读取 M3U 文件'));
       return;
     }
     final files = await _scanM3uFiles();
     if (files.isEmpty) {
-      _showTip('未找到 M3U 文件，请放到 /sdcard/Download 或 /sdcard 根目录');
+      _showTip(L10n.t('未找到 M3U 文件，请放到 /sdcard/Download 或 /sdcard 根目录'));
       return;
     }
     final picked = await _pickFileDialog(files);
@@ -354,12 +357,12 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     try {
       final content = await File(picked).readAsString();
       if (content.trim().isEmpty) {
-        _showTip('文件内容为空');
+        _showTip(L10n.t('文件内容为空'));
         return;
       }
       final channels = parseM3U(content);
       if (channels.isEmpty) {
-        _showTip('未识别到有效频道，请检查 M3U 格式');
+        _showTip(L10n.t('未识别到有效频道，请检查 M3U 格式'));
         return;
       }
       // 持久化到应用文档目录，下次启动自动加载
@@ -369,11 +372,11 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         await f.writeAsString(content, flush: true);
         await NativeIO.prefsSetBool('m3u_saved', true);
       } catch (e) {
-        _showTip('列表已加载，但保存失败: $e');
+        _showTip(L10n.t('列表已加载，但保存失败: $e', 'List loaded, but save failed: {e}', {'e': e}));
       }
       _applyM3U(content, picked.split('/').last);
     } catch (e) {
-      _showTip('读取文件失败: $e');
+      _showTip(L10n.t('读取文件失败: $e', 'Failed to read file: {e}', {'e': e}));
     }
     } finally {
       _importingM3U = false;
@@ -443,7 +446,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       _checking = false;
     });
     // 不保存：避免在 _restorePrefs 之前覆盖用户配置
-    _showTip('已加载 $label（${channels.length} 路）');
+    _showTip(L10n.t('已加载 $label（${channels.length} 路）', 'Loaded {label} ({n} channels)', {'label': label, 'n': channels.length}));
   }
 
   void _showTip(String msg) {
@@ -548,6 +551,13 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   void _setTvMode(String mode) {
     _update(() => _tvOverride = mode == 'auto' ? null : mode);
     _savePrefs();
+  }
+
+  /// 切换界面语言（跟随系统/中文/English），立即生效并持久化
+  void _setLang(String key) {
+    L10n.lang = L10n.langFrom(key);
+    NativeIO.prefsSetString('lang', key);
+    if (mounted) setState(() {});
   }
 
   void _changeQuality(String q) {
@@ -739,9 +749,9 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     await _applyOrientationLock();
     _savePrefs();
     _showTip(switch (_orientationLock) {
-      'landscape' => '已切换横屏',
-      'portrait' => '已切换竖屏',
-      _ => '恢复自动旋转',
+      'landscape' => L10n.t('已切换横屏'),
+      'portrait' => L10n.t('已切换竖屏'),
+      _ => L10n.t('恢复自动旋转'),
     });
     _poke();
   }
@@ -750,9 +760,9 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   Future<void> _enterPip() async {
     try {
       final ok = await _pipChannel.invokeMethod<bool>('enter');
-      if (ok != true) _showTip('此设备不支持画中画（需 Android 8.0+）');
+      if (ok != true) _showTip(L10n.t('此设备不支持画中画（需 Android 8.0+）'));
     } catch (_) {
-      _showTip('画中画不可用');
+      _showTip(L10n.t('画中画不可用'));
     }
   }
 
@@ -792,7 +802,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         return true;
       }
       _lastBackTs = now;
-      _showTip('再按一次返回键退出');
+      _showTip(L10n.t('再按一次返回键退出'));
       return true;
     }
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
@@ -946,7 +956,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     );
     final c = NativePlayerController.networkUrl(Uri.parse(url), config: cfg);
     _pool[url] = c;
-    _statuses[url] = '连接中';
+    _statuses[url] = L10n.t('连接中');
     c.setLooping(true);
     c.setVolume(0); // 网格默认静音
     c.addListener(() => _onControllerChanged(url));
@@ -971,7 +981,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             cc.value.isInitialized &&
             !cc.value.hasFrame &&
             !cc.value.hasError) {
-          _statuses[url] = '画面加载超时·重连中';
+          _statuses[url] = L10n.t('画面加载超时·重连中');
           setState(() {});
           _scheduleRetry(url);
         }
@@ -1000,14 +1010,14 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     final c = _pool[url];
     if (c == null) return;
     if (c.value.hasError) {
-      _statuses[url] = '错误·重连中';
+      _statuses[url] = L10n.t('错误·重连中');
       if (mounted) setState(() {});
       _scheduleRetry(url);
       return;
     }
     if (c.value.isInitialized) {
       // 有首帧才算播放中；否则保持"连接中"（open 成功但还没出帧，画面由 native 渲染）
-      _statuses[url] = c.value.hasFrame ? '播放中' : '连接中';
+      _statuses[url] = c.value.hasFrame ? L10n.t('播放中') : L10n.t('连接中');
       if (mounted) setState(() {});
     }
   }
@@ -1027,7 +1037,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     });
   }
 
-  String _statusOf(String url) => _statuses[url] ?? '连接中';
+  String _statusOf(String url) => _statuses[url] ?? L10n.t('连接中');
 
   // ---------- 布局 ----------
 
@@ -1098,7 +1108,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       return;
     }
     _lastBackTs = now;
-    _showTip('再按一次返回键退出');
+    _showTip(L10n.t('再按一次返回键退出'));
   }
 
   @override
@@ -1178,13 +1188,13 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   Widget _buildLoading() {
     if (_checking) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             CircularProgressIndicator(color: Colors.white70),
             SizedBox(height: 16),
-            Text('正在加载上次的播放列表...',
+            Text(L10n.t('正在加载上次的播放列表...'),
                 style: TextStyle(color: Colors.white70)),
           ],
         ),
@@ -1196,10 +1206,10 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         children: [
           const Icon(Icons.playlist_play, color: Colors.white38, size: 72),
           const SizedBox(height: 16),
-          const Text('未选择播放列表',
+          Text(L10n.t('未选择播放列表'),
               style: TextStyle(color: Colors.white70, fontSize: 17)),
           const SizedBox(height: 8),
-          const Text('请选择 M3U 文件后开始使用',
+          Text(L10n.t('请选择 M3U 文件后开始使用'),
               style: TextStyle(color: Colors.white38, fontSize: 13)),
           const SizedBox(height: 24),
           ElevatedButton.icon(
@@ -1208,7 +1218,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
               foregroundColor: Colors.black,
             ),
             icon: const Icon(Icons.folder_open),
-            label: const Text('选择 M3U 文件'),
+            label: Text(L10n.t('选择 M3U 文件')),
             onPressed: _importM3U,
           ),
         ],
@@ -1242,26 +1252,26 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             child: Row(
               children: [
                 IconButton(
-                  tooltip: '控制面板',
+                  tooltip: L10n.t('控制面板'),
                   icon: const Icon(Icons.menu, color: Colors.white, size: 22),
                   onPressed: _togglePanel,
                 ),
                 Expanded(
                   child: Text(
-                    '$_quality · 第 $_displayPage/$_totalPages 页',
+                    L10n.t('$_quality · 第 $_displayPage/$_totalPages 页', '{q} · Page {p}/{t}', {'q': _quality, 'p': _displayPage, 't': _totalPages}),
                     style: const TextStyle(color: Colors.white, fontSize: 14),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 IconButton(
-                  tooltip: '画中画',
+                  tooltip: L10n.t('画中画'),
                   icon: const Icon(Icons.picture_in_picture_alt,
                       color: Colors.white, size: 20),
                   onPressed: _enterPip,
                 ),
                 IconButton(
-                  tooltip: '旋转屏幕',
+                  tooltip: L10n.t('旋转屏幕'),
                   icon: Icon(
                     _orientationLock == 'landscape'
                         ? Icons.screen_lock_landscape
@@ -1321,8 +1331,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     // 快速翻页时，GridView 用新页的 channels（显示新页的8个框），框里只显示标题不创建播放器
     final channels = _pageChannels;
     if (channels.isEmpty) {
-      return const Center(
-        child: Text('当前筛选无频道\n请打开面板切换分组/码流/翻页',
+      return Center(
+        child: Text(L10n.t('当前筛选无频道\n请打开面板切换分组/码流/翻页'),
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white54, fontSize: 15)),
       );
@@ -1478,6 +1488,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             onPage: _turnPage,
             onStyle: _setPanelStyle,
             onTvMode: _setTvMode,
+            onLang: _setLang,
             tvOverride: _tvOverride,
             onImport: _importM3U,
             videoDecoder: _videoDecoder,
@@ -1543,6 +1554,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             onPage: _turnPage,
             onStyle: _setPanelStyle,
             onTvMode: _setTvMode,
+            onLang: _setLang,
             tvOverride: _tvOverride,
             onImport: _importM3U,
             videoDecoder: _videoDecoder,
@@ -1581,170 +1593,170 @@ Future<void> showHelpDialog(BuildContext context, {bool dismissible = true}) {
     builder: (ctx) => AlertDialog(
       backgroundColor: Colors.blueGrey.shade900,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: const Text('M3U播放器 · 操作说明',
+      title: Text(L10n.t('M3U播放器 · 操作说明'),
           style: TextStyle(color: Colors.white, fontSize: 16)),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _helpSection('基本操作', [
+            _helpSection(L10n.t('基本操作'), [
               '',
-              '【打开 / 关闭控制面板】',
-              '手机：点击屏幕中间区域，或点击顶部按钮',
-              '电视：按遥控器菜单键 MENU',
+              L10n.t('【打开 / 关闭控制面板】'),
+              L10n.t('手机：点击屏幕中间区域，或点击顶部按钮'),
+              L10n.t('电视：按遥控器菜单键 MENU'),
               '',
-              '【翻页】',
-              '手机：网格模式下，手指上滑=下一页，下滑=上一页',
-              '电视：按左右方向键，或用控制面板的翻页按钮',
+              L10n.t('【翻页】'),
+              L10n.t('手机：网格模式下，手指上滑=下一页，下滑=上一页'),
+              L10n.t('电视：按左右方向键，或用控制面板的翻页按钮'),
               '',
-              '【切换分组】',
-              '手机：底部半透明条左右滑动选择分组',
-              '电视：控制面板里选择分组',
+              L10n.t('【切换分组】'),
+              L10n.t('手机：底部半透明条左右滑动选择分组'),
+              L10n.t('电视：控制面板里选择分组'),
               '',
-              '【切换码流】',
-              '控制面板里选择：清晰 / 流畅',
+              L10n.t('【切换码流】'),
+              L10n.t('控制面板里选择：清晰 / 流畅'),
               '',
-              '【切换布局】',
-              '控制面板里用加减按钮调节：同时加载数量（1~16路）',
-              '还可以用加减按钮调节：列布局、行布局（1~4列/行）',
+              L10n.t('【切换布局】'),
+              L10n.t('控制面板里用加减按钮调节：同时加载数量（1~16路）'),
+              L10n.t('还可以用加减按钮调节：列布局、行布局（1~4列/行）'),
             ]),
             // Windows 电脑版专属操作说明（仅 Windows 显示，Android/TV 不显示）
             if (Platform.isWindows) ...[
               const SizedBox(height: 10),
-              _helpSection('Windows 电脑版', [
+              _helpSection(L10n.t('Windows 电脑版'), [
                 '',
-                '【打开 / 关闭控制面板】',
-                '点击左上角菜单按钮',
+                L10n.t('【打开 / 关闭控制面板】'),
+                L10n.t('点击左上角菜单按钮'),
                 '',
-                '【进入全屏】',
-                '双击某个视频画面',
+                L10n.t('【进入全屏】'),
+                L10n.t('双击某个视频画面'),
                 '',
-                '【退出全屏】',
-                '按 ESC 键，或点击鼠标右键',
+                L10n.t('【退出全屏】'),
+                L10n.t('按 ESC 键，或点击鼠标右键'),
                 '',
-                '【翻页】',
-                '鼠标滚轮向下滚 = 下一页，向上滚 = 上一页',
-                '列表可滚动时：滚到底部继续下滚 = 下一页，滚到顶部继续上滚 = 上一页',
+                L10n.t('【翻页】'),
+                L10n.t('鼠标滚轮向下滚 = 下一页，向上滚 = 上一页'),
+                L10n.t('列表可滚动时：滚到底部继续下滚 = 下一页，滚到顶部继续上滚 = 上一页'),
                 '',
-                '【加载播放列表】',
-                '直接把 M3U 文件拖进窗口即可',
-                '也可以打开控制面板点击"加载 M3U 文件"',
+                L10n.t('【加载播放列表】'),
+                L10n.t('直接把 M3U 文件拖进窗口即可'),
+                L10n.t('也可以打开控制面板点击"加载 M3U 文件"'),
                 '',
-                '【键盘】',
-                '方向键移动选中，Enter / 空格进入全屏',
+                L10n.t('【键盘】'),
+                L10n.t('方向键移动选中，Enter / 空格进入全屏'),
                 '',
-                '【配置保存】',
-                '所有修改自动保存到软件目录下的 config.ini，下次启动恢复',
+                L10n.t('【配置保存】'),
+                L10n.t('所有修改自动保存到软件目录下的 config.ini，下次启动恢复'),
               ]),
             ],
             const SizedBox(height: 10),
-            _helpSection('全屏模式', [
+            _helpSection(L10n.t('全屏模式'), [
               '',
-              '【进入全屏】',
-              '手机：双击某个视频画面',
-              '电视：方向键选中后按 OK 键',
+              L10n.t('【进入全屏】'),
+              L10n.t('手机：双击某个视频画面'),
+              L10n.t('电视：方向键选中后按 OK 键'),
               '',
-              '【退出全屏】',
-              '手机：再双击一次，或按系统返回键',
-              '电视：按返回键',
+              L10n.t('【退出全屏】'),
+              L10n.t('手机：再双击一次，或按系统返回键'),
+              L10n.t('电视：按返回键'),
               '',
-              '【全屏内缩放】',
-              '手机：双指捏合放大缩小，最大 8 倍',
-              '电视：暂不支持缩放',
+              L10n.t('【全屏内缩放】'),
+              L10n.t('手机：双指捏合放大缩小，最大 8 倍'),
+              L10n.t('电视：暂不支持缩放'),
               '',
-              '【全屏内旋转】',
-              '手机：双击全屏画面，在横屏 / 竖屏之间切换',
+              L10n.t('【全屏内旋转】'),
+              L10n.t('手机：双击全屏画面，在横屏 / 竖屏之间切换'),
               '',
-              '【全屏声音】',
-              '进入全屏后自动打开声音，退出后静音',
+              L10n.t('【全屏声音】'),
+              L10n.t('进入全屏后自动打开声音，退出后静音'),
             ]),
             const SizedBox(height: 10),
-            _helpSection('返回键行为', [
+            _helpSection(L10n.t('返回键行为'), [
               '',
-              '【按一次返回键】',
-              '如果控制面板打开：关闭控制面板',
-              '如果在全屏模式：退出全屏',
-              '如果在主界面：提示再按一次退出',
+              L10n.t('【按一次返回键】'),
+              L10n.t('如果控制面板打开：关闭控制面板'),
+              L10n.t('如果在全屏模式：退出全屏'),
+              L10n.t('如果在主界面：提示再按一次退出'),
               '',
-              '【快速按两次返回键】',
-              '在主界面快速按两次，直接退出软件',
+              L10n.t('【快速按两次返回键】'),
+              L10n.t('在主界面快速按两次，直接退出软件'),
             ]),
             const SizedBox(height: 10),
-            _helpSection('电视遥控器', [
+            _helpSection(L10n.t('电视遥控器'), [
               '',
-              '方向键：移动选中焦点',
-              'OK / 确认键：进入选中的画面',
-              '菜单键 MENU：打开 / 关闭控制面板',
-              '返回键：关闭面板 · 退出全屏 · 退出软件',
+              L10n.t('方向键：移动选中焦点'),
+              L10n.t('OK / 确认键：进入选中的画面'),
+              L10n.t('菜单键 MENU：打开 / 关闭控制面板'),
+              L10n.t('返回键：关闭面板 · 退出全屏 · 退出软件'),
             ]),
             const SizedBox(height: 10),
-            _helpSection('画面提示', [
+            _helpSection(L10n.t('画面提示'), [
               '',
-              '顶部信息条 3 秒自动隐藏，轻触唤出',
-              '底部半透明条为分组，左右滑动切换',
-              '控制面板：布局 / 码流 / 预加载 / 翻页 / 参数设置',
-              '所有修改的设置会自动保存，下次打开生效',
-              '点重置所有参数可以恢复默认设置',
+              L10n.t('顶部信息条 3 秒自动隐藏，轻触唤出'),
+              L10n.t('底部半透明条为分组，左右滑动切换'),
+              L10n.t('控制面板：布局 / 码流 / 预加载 / 翻页 / 参数设置'),
+              L10n.t('所有修改的设置会自动保存，下次打开生效'),
+              L10n.t('点重置所有参数可以恢复默认设置'),
             ]),
             const SizedBox(height: 10),
-            _helpSection('M3U 分组 / 码流设置', [
-              '分组 = group-title 的值，如 group-title="教室1;清晰"',
-              '分号 ; 后面的就是码流名（清晰 / 流畅，可自定义）',
-              'URL 结尾 _0 = 清晰(HEVC)、_1 = 流畅(H.264)',
-              '一个频道只识别第一个 group-title',
-              '没有分组标记的频道归入"全部"',
+            _helpSection(L10n.t('M3U 分组 / 码流设置'), [
+              L10n.t('分组 = group-title 的值，如 group-title="教室1;清晰"'),
+              L10n.t('分号 ; 后面的就是码流名（清晰 / 流畅，可自定义）'),
+              L10n.t('URL 结尾 _0 = 清晰(HEVC)、_1 = 流畅(H.264)'),
+              L10n.t('一个频道只识别第一个 group-title'),
+              L10n.t('没有分组标记的频道归入"全部"'),
             ]),
             const SizedBox(height: 10),
-            _helpSection('播放器参数（调完翻页生效）', [
+            _helpSection(L10n.t('播放器参数（调完翻页生效）'), [
               '',
-              '【解码方式】',
-              '自动：自动选择硬解或软解，推荐默认',
-              '硬解：GPU硬件解码，占用CPU低，播放流畅',
-              '软解：CPU软件解码，兼容性好，占用CPU高',
-              '如果硬解黑屏或卡顿，切到软试试',
+              L10n.t('【解码方式】'),
+              L10n.t('自动：自动选择硬解或软解，推荐默认'),
+              L10n.t('硬解：GPU硬件解码，占用CPU低，播放流畅'),
+              L10n.t('软解：CPU软件解码，兼容性好，占用CPU高'),
+              L10n.t('如果硬解黑屏或卡顿，切到软试试'),
               '',
-              '【探测大小】avformat.probesize',
-              '识别流格式的缓存大小，单位字节',
-              '越小：首帧出得快，但可能识别不全导致失败',
-              '越大：识别准确，但首帧出得慢',
-              '推荐：32K（32768），网络好可以 8K',
+              L10n.t('【探测大小】avformat.probesize'),
+              L10n.t('识别流格式的缓存大小，单位字节'),
+              L10n.t('越小：首帧出得快，但可能识别不全导致失败'),
+              L10n.t('越大：识别准确，但首帧出得慢'),
+              L10n.t('推荐：32K（32768），网络好可以 8K'),
               '',
-              '【分析时长】avformat.analyzeduration',
-              '解码分析流信息的时间，单位微秒',
-              '越小：首帧出得快，但可能丢帧或卡顿',
-              '越大：分析充分，播放稳定，但首帧慢',
-              '推荐：20ms（20000微秒）',
+              L10n.t('【分析时长】avformat.analyzeduration'),
+              L10n.t('解码分析流信息的时间，单位微秒'),
+              L10n.t('越小：首帧出得快，但可能丢帧或卡顿'),
+              L10n.t('越大：分析充分，播放稳定，但首帧慢'),
+              L10n.t('推荐：20ms（20000微秒）'),
               '',
-              '【低延迟 nobuffer】avformat.fflags=+nobuffer',
-              'FFmpeg 低延迟开关，不缓冲直接播放',
-              '开启：延迟低，但网络抖动时容易卡顿',
-              '关闭：有缓冲，播放更平滑，延迟高一点',
-              '监控场景推荐：开启',
+              L10n.t('【低延迟 nobuffer】avformat.fflags=+nobuffer'),
+              L10n.t('FFmpeg 低延迟开关，不缓冲直接播放'),
+              L10n.t('开启：延迟低，但网络抖动时容易卡顿'),
+              L10n.t('关闭：有缓冲，播放更平滑，延迟高一点'),
+              L10n.t('监控场景推荐：开启'),
               '',
               '【flush flush_packets】avformat.fflags=+flush_packets',
-              '清缓冲降延迟，每次出包立即播放',
-              '和 nobuffer 配合使用，进一步降低延迟',
+              L10n.t('清缓冲降延迟，每次出包立即播放'),
+              L10n.t('和 nobuffer 配合使用，进一步降低延迟'),
               '',
-              '【首帧超时】',
-              '打开流后，多少秒没出首帧就判定失败，自动重连',
-              '推荐：3秒，网络差可以调到 5~10 秒',
+              L10n.t('【首帧超时】'),
+              L10n.t('打开流后，多少秒没出首帧就判定失败，自动重连'),
+              L10n.t('推荐：3秒，网络差可以调到 5~10 秒'),
               '',
-              '【心跳超时】',
-              '出首帧后，多少秒没新帧就判定僵死，自动重连',
-              '推荐：5秒，监控流稳定，5秒没新帧说明断了',
+              L10n.t('【心跳超时】'),
+              L10n.t('出首帧后，多少秒没新帧就判定僵死，自动重连'),
+              L10n.t('推荐：5秒，监控流稳定，5秒没新帧说明断了'),
               '',
-              '【缓冲秒数】setBufferRange',
-              'fvp 播放器缓冲机制，缓冲多少秒再播放',
-              '0：不缓冲，低延迟，和 nobuffer 配合',
-              '2~5秒：缓冲几秒，播放更稳定，延迟高',
-              '注意：不要和 nobuffer 同时开',
-              '  低延迟方案：nobuffer=开，缓冲秒数=0',
-              '  稳定优先方案：nobuffer=关，缓冲秒数=2~5',
+              L10n.t('【缓冲秒数】setBufferRange'),
+              L10n.t('fvp 播放器缓冲机制，缓冲多少秒再播放'),
+              L10n.t('0：不缓冲，低延迟，和 nobuffer 配合'),
+              L10n.t('2~5秒：缓冲几秒，播放更稳定，延迟高'),
+              L10n.t('注意：不要和 nobuffer 同时开'),
+              L10n.t('  低延迟方案：nobuffer=开，缓冲秒数=0'),
+              L10n.t('  稳定优先方案：nobuffer=关，缓冲秒数=2~5'),
               '',
-              '【重连最大间隔】avio.reconnect_delay_max',
-              '网络断开后，自动重连的最大等待时间',
-              '推荐：7秒，不要太小，避免频繁重连',
+              L10n.t('【重连最大间隔】avio.reconnect_delay_max'),
+              L10n.t('网络断开后，自动重连的最大等待时间'),
+              L10n.t('推荐：7秒，不要太小，避免频繁重连'),
             ]),
           ],
         ),
@@ -1752,7 +1764,7 @@ Future<void> showHelpDialog(BuildContext context, {bool dismissible = true}) {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(),
-          child: const Text('知道了',
+          child: Text(L10n.t('知道了'),
               style: TextStyle(color: Colors.lightBlueAccent, fontSize: 15)),
         ),
       ],
@@ -1786,30 +1798,30 @@ Future<void> showAppAboutDialog(BuildContext context) {
     builder: (ctx) => AlertDialog(
       backgroundColor: Colors.blueGrey.shade900,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: const Text('关于',
+      title: Text(L10n.t('关于'),
           style: TextStyle(color: Colors.white, fontSize: 16)),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _aboutRow('应用名称', kAppName),
-            _aboutRow('版本', '$kAppVersion（build $kAppBuild）'),
-            _aboutRow('作者', kAppAuthor),
-            _aboutRow('许可', kAppLicense),
+            _aboutRow(L10n.t('应用名称'), kAppName),
+            _aboutRow(L10n.t('版本'), '$kAppVersion（build $kAppBuild）'),
+            _aboutRow(L10n.t('作者'), kAppAuthor),
+            _aboutRow(L10n.t('许可'), kAppLicense),
             const SizedBox(height: 10),
-            const Text('组件架构构成',
+            Text(L10n.t('组件架构构成'),
                 style: TextStyle(
                     color: Colors.lightBlueAccent,
                     fontSize: 14,
                     fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            for (final l in const [
-              'Flutter 3.47.4 / Dart 3.13.3（UI 框架）',
-              'fvp 0.38.1（MDK 多媒体内核）',
-              'FFmpeg（HEVC-in-FLV / H.264 硬解与软解）',
-              '平台：Android（arm64-v8a / armeabi-v7a / x86_64）',
-              '平台：Windows（x64 桌面版）',
+            for (final l in [
+              L10n.t('Flutter 3.47.4 / Dart 3.13.3（UI 框架）'),
+              L10n.t('fvp 0.38.1（MDK 多媒体内核）'),
+              L10n.t('FFmpeg（HEVC-in-FLV / H.264 硬解与软解）'),
+              L10n.t('平台：Android（arm64-v8a / armeabi-v7a / x86_64）'),
+              L10n.t('平台：Windows（x64 桌面版）'),
             ])
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),
@@ -1823,7 +1835,7 @@ Future<void> showAppAboutDialog(BuildContext context) {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(),
-          child: const Text('知道了',
+          child: Text(L10n.t('知道了'),
               style: TextStyle(color: Colors.lightBlueAccent, fontSize: 15)),
         ),
       ],
@@ -1969,6 +1981,7 @@ class _PanelBody extends StatefulWidget {
   final ValueChanged<String> onGroup;
   final String? tvOverride;
   final ValueChanged<String> onTvMode;
+  final ValueChanged<String> onLang;
   final ValueChanged<int> onPage;
   final ValueChanged<PanelStyle> onStyle;
   final VoidCallback onImport;
@@ -2017,6 +2030,7 @@ class _PanelBody extends StatefulWidget {
     required this.onGroup,
     required this.tvOverride,
     required this.onTvMode,
+    required this.onLang,
     required this.onPage,
     required this.onStyle,
     required this.onImport,
@@ -2090,12 +2104,12 @@ class _PanelBodyState extends State<_PanelBody> {
           padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
           child: Row(
             children: [
-              const Expanded(
-                child: Text('控制面板',
+              Expanded(
+                child: Text(L10n.t('控制面板'),
                     style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
               ),
               IconButton(
-                tooltip: '面板样式',
+                tooltip: L10n.t('面板样式'),
                 icon: const Icon(Icons.swap_horiz, color: Colors.white70, size: 20),
                 onPressed: () => widget.onStyle(switch (widget.panelStyle) {
                   PanelStyle.auto => PanelStyle.left,
@@ -2104,7 +2118,7 @@ class _PanelBodyState extends State<_PanelBody> {
                 }),
               ),
               IconButton(
-                tooltip: '关闭',
+                tooltip: L10n.t('关闭'),
                 icon: const Icon(Icons.close, color: Colors.white70, size: 20),
                 onPressed: widget.onClose,
               ),
@@ -2118,37 +2132,37 @@ class _PanelBodyState extends State<_PanelBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _label('同时加载数量'),
+                _label(L10n.t('同时加载数量')),
                 _stepperRow(
-                  '${widget.layout} 路',
+                  L10n.t('${widget.layout} 路', '{n} ch', {'n': widget.layout}),
                   widget.layout,
                   1,
                   16,
                   widget.onLayout,
                 ),
                 const SizedBox(height: 10),
-                _label('列布局'),
+                _label(L10n.t('列布局')),
                 _stepperRow(
-                  widget.columns == 0 ? '自动' : '${widget.columns}列',
+                  widget.columns == 0 ? L10n.t('自动') : L10n.t('${widget.columns}列', '{n} cols', {'n': widget.columns}),
                   widget.columns,
                   0,
                   4,
                   widget.onColumns,
                 ),
                 const SizedBox(height: 10),
-                _label('行布局'),
+                _label(L10n.t('行布局')),
                 _stepperRow(
-                  widget.rows == 0 ? '自动' : '${widget.rows}行',
+                  widget.rows == 0 ? L10n.t('自动') : L10n.t('${widget.rows}行', '{n} rows', {'n': widget.rows}),
                   widget.rows,
                   0,
                   4,
                   widget.onRows,
                 ),
                 const SizedBox(height: 10),
-                _label('预加载下一页'),
-                _stepperRow('${widget.preload} 路', widget.preload, 0, 8, widget.onPreload),
+                _label(L10n.t('预加载下一页')),
+                _stepperRow(L10n.t('${widget.preload} 路', '{n} ch', {'n': widget.preload}), widget.preload, 0, 8, widget.onPreload),
                 const SizedBox(height: 10),
-                _label('码流'),
+                _label(L10n.t('码流')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
@@ -2158,7 +2172,7 @@ class _PanelBodyState extends State<_PanelBody> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                _label('分组'),
+                _label(L10n.t('分组')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
@@ -2168,25 +2182,25 @@ class _PanelBodyState extends State<_PanelBody> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _label('翻页'),
+                _label(L10n.t('翻页')),
                 Row(
                   children: [
-                    _btn('上一页', false, () => widget.onPage(-1)),
+                    _btn(L10n.t('上一页'), false, () => widget.onPage(-1)),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        '第 ${widget.page} / ${widget.totalPages} 页',
+                        L10n.t('第 ${widget.page} / ${widget.totalPages} 页', 'Page {p} / {t}', {'p': widget.page, 't': widget.totalPages}),
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: Colors.white, fontSize: 14),
                       ),
                     ),
                     const SizedBox(width: 6),
-                    _btn('下一页', false, () => widget.onPage(1)),
+                    _btn(L10n.t('下一页'), false, () => widget.onPage(1)),
                   ],
                 ),
                 const SizedBox(height: 10),
                 const Divider(color: Colors.white24),
-                _label('面板样式'),
+                _label(L10n.t('面板样式')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
@@ -2194,9 +2208,9 @@ class _PanelBodyState extends State<_PanelBody> {
                     for (final s in PanelStyle.values) ...[
                       _btn(
                         switch (s) {
-                          PanelStyle.auto => '自动',
-                          PanelStyle.left => '左侧',
-                          PanelStyle.bottom => '底部',
+                          PanelStyle.auto => L10n.t('自动'),
+                          PanelStyle.left => L10n.t('左侧'),
+                          PanelStyle.bottom => L10n.t('底部'),
                         },
                         widget.panelStyle == s,
                         () => widget.onStyle(s),
@@ -2206,33 +2220,45 @@ class _PanelBodyState extends State<_PanelBody> {
                 ),
                 const SizedBox(height: 10),
                 const Divider(color: Colors.white24),
-                _label('TV 模式'),
+                _label(L10n.t('TV 模式')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
                   children: [
-                    _btn('自动', widget.tvOverride == null, () => widget.onTvMode('auto')),
-                    _btn('开启', widget.tvOverride == 'on', () => widget.onTvMode('on')),
-                    _btn('关闭', widget.tvOverride == 'off', () => widget.onTvMode('off')),
+                    _btn(L10n.t('自动'), widget.tvOverride == null, () => widget.onTvMode('auto')),
+                    _btn(L10n.t('开启'), widget.tvOverride == 'on', () => widget.onTvMode('on')),
+                    _btn(L10n.t('关闭'), widget.tvOverride == 'off', () => widget.onTvMode('off')),
                   ],
                 ),
                 const SizedBox(height: 10),
                 const Divider(color: Colors.white24),
-                _label('播放器参数（调完翻页生效，自动保存）'),
-                _label('解码方式'),
+                _label(L10n.t('界面语言')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
                   children: [
-                    _btn('自动', widget.videoDecoder == 'auto', () => widget.onDecoder('auto')),
-                    _btn('硬解', widget.videoDecoder == 'mediacodec', () => widget.onDecoder('mediacodec')),
-                    _btn('软解', widget.videoDecoder == 'software', () => widget.onDecoder('software')),
+                    _btn(L10n.t('跟随系统'), L10n.langKey() == 'system', () => widget.onLang('system')),
+                    _btn('中文', L10n.langKey() == 'zh', () => widget.onLang('zh')),
+                    _btn('English', L10n.langKey() == 'en', () => widget.onLang('en')),
                   ],
                 ),
-                const Text('硬解=GPU解码快，软解=CPU解码稳，自动=两者切换',
+                const SizedBox(height: 10),
+                const Divider(color: Colors.white24),
+                _label(L10n.t('播放器参数（调完翻页生效，自动保存）')),
+                _label(L10n.t('解码方式')),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 8,
+                  children: [
+                    _btn(L10n.t('自动'), widget.videoDecoder == 'auto', () => widget.onDecoder('auto')),
+                    _btn(L10n.t('硬解'), widget.videoDecoder == 'mediacodec', () => widget.onDecoder('mediacodec')),
+                    _btn(L10n.t('软解'), widget.videoDecoder == 'software', () => widget.onDecoder('software')),
+                  ],
+                ),
+                Text(L10n.t('硬解=GPU解码快，软解=CPU解码稳，自动=两者切换'),
                     style: TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 10),
-                _label('探测大小'),
+                _label(L10n.t('探测大小')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
@@ -2243,10 +2269,10 @@ class _PanelBodyState extends State<_PanelBody> {
                     _btn('128K', widget.probesize == 131072, () => widget.onProbesize(131072)),
                   ],
                 ),
-                const Text('探测大小=识别流格式的缓存，越小越快但可能不稳定',
+                Text(L10n.t('探测大小=识别流格式的缓存，越小越快但可能不稳定'),
                     style: TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 10),
-                _label('分析时长'),
+                _label(L10n.t('分析时长')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
@@ -2257,10 +2283,10 @@ class _PanelBodyState extends State<_PanelBody> {
                     _btn('100ms', widget.analyzeduration == 100000, () => widget.onAnalyzeduration(100000)),
                   ],
                 ),
-                const Text('分析时长=解码分析流的时间，越小越快但可能丢帧',
+                Text(L10n.t('分析时长=解码分析流的时间，越小越快但可能丢帧'),
                     style: TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 10),
-                _label('低延迟'),
+                _label(L10n.t('低延迟')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
@@ -2269,57 +2295,57 @@ class _PanelBodyState extends State<_PanelBody> {
                     _btn('flush', widget.flushPackets, () => widget.onFlushPackets(!widget.flushPackets)),
                   ],
                 ),
-                const Text('nobuffer=不缓冲直接播放，flush=清缓冲降延迟',
+                Text(L10n.t('nobuffer=不缓冲直接播放，flush=清缓冲降延迟'),
                     style: TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 10),
-                _label('首帧超时（秒）'),
+                _label(L10n.t('首帧超时（秒）')),
                 _stepperRow('${widget.firstFrameTimeout}', widget.firstFrameTimeout, 1, 60, widget.onFirstFrameTimeout),
-                const Text('首帧最大等待时间，超时重连',
+                Text(L10n.t('首帧最大等待时间，超时重连'),
                     style: TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 10),
-                _label('心跳超时（秒）'),
+                _label(L10n.t('心跳超时（秒）')),
                 _stepperRow('${widget.heartbeatTimeout}', widget.heartbeatTimeout, 1, 60, widget.onHeartbeatTimeout),
-                const Text('出首帧后无新帧判定僵死',
+                Text(L10n.t('出首帧后无新帧判定僵死'),
                     style: TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 10),
-                _label('缓冲秒数'),
+                _label(L10n.t('缓冲秒数')),
                 _stepperRow('${widget.bufferSeconds}', widget.bufferSeconds, 0, 10, widget.onBufferSeconds),
-                const Text('缓冲多少秒再播放，0=不缓冲',
+                Text(L10n.t('缓冲多少秒再播放，0=不缓冲'),
                     style: TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 10),
-                _label('重连最大间隔（秒）'),
+                _label(L10n.t('重连最大间隔（秒）')),
                 _stepperRow('${widget.reconnectDelayMax}', widget.reconnectDelayMax, 1, 30, widget.onReconnectDelayMax),
-                const Text('网络断开后自动重连的最大等待时间',
+                Text(L10n.t('网络断开后自动重连的最大等待时间'),
                     style: TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 10),
                 const Divider(color: Colors.white24),
-                _label('屏幕方向'),
+                _label(L10n.t('屏幕方向')),
                 Wrap(
                   spacing: 6,
                   runSpacing: 8,
                   children: [
-                    _btn('自动', widget.orientationLock == null, () => widget.onOrientation('auto')),
-                    _btn('竖屏', widget.orientationLock == 'portrait', () => widget.onOrientation('portrait')),
-                    _btn('横屏', widget.orientationLock == 'landscape', () => widget.onOrientation('landscape')),
+                    _btn(L10n.t('自动'), widget.orientationLock == null, () => widget.onOrientation('auto')),
+                    _btn(L10n.t('竖屏'), widget.orientationLock == 'portrait', () => widget.onOrientation('portrait')),
+                    _btn(L10n.t('横屏'), widget.orientationLock == 'landscape', () => widget.onOrientation('landscape')),
                   ],
                 ),
                 const SizedBox(height: 14),
                 Center(
-                  child: _btn('加载 M3U 文件', false, widget.onImport),
+                  child: _btn(L10n.t('加载 M3U 文件'), false, widget.onImport),
                 ),
                 const SizedBox(height: 10),
                 Center(
-                  child: _btn('操作说明', false,
+                  child: _btn(L10n.t('操作说明'), false,
                       () => showHelpDialog(context)),
                 ),
                 const SizedBox(height: 10),
                 Center(
-                  child: _btn('关于', false, () => showAppAboutDialog(context)),
+                  child: _btn(L10n.t('关于'), false, () => showAppAboutDialog(context)),
                 ),
                 const SizedBox(height: 10),
                 const SizedBox(height: 10),
                 Center(
-                  child: _btn('重置所有参数', false, widget.onReset),
+                  child: _btn(L10n.t('重置所有参数'), false, widget.onReset),
                 ),
               ],
             ),
@@ -2679,7 +2705,7 @@ class _TvFileDialogState extends State<_TvFileDialog> {
     return AlertDialog(
       backgroundColor: Colors.blueGrey.shade900,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: const Text('选择 M3U 文件',
+      title: Text(L10n.t('选择 M3U 文件'),
           style: TextStyle(color: Colors.white, fontSize: 16)),
       content: SizedBox(
         width: 520,
@@ -2726,7 +2752,7 @@ class _TvFileDialogState extends State<_TvFileDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消',
+          child: Text(L10n.t('取消'),
               style: TextStyle(color: Colors.lightBlueAccent, fontSize: 14)),
         ),
       ],
