@@ -134,6 +134,25 @@ class NativeIO {
     }
   }
 
+  /// 打开外部链接（关于页的项目主页 / 新版本下载页）
+  static Future<bool> openUrl(String url) async {
+    try {
+      if (kIsDesktop) {
+        if (Platform.isWindows) {
+          // start 是 cmd 内置命令；空标题参数防止链接被当成窗口标题
+          await Process.run('cmd', ['/c', 'start', '', url], runInShell: true);
+        } else {
+          await Process.run('xdg-open', [url]);
+        }
+        return true;
+      }
+      final ok = await _ch.invokeMethod<bool>('openUrl', {'url': url});
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 桌面：在系统文件管理器里打开目录（Windows 资源管理器 / Linux 文件管理器）
   static Future<void> openDirectory(String path) async {
     if (!kIsDesktop) return;

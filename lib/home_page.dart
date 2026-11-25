@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' show AppExitResponse;
@@ -2353,15 +2354,146 @@ Widget _helpSection(String title, List<String> lines) {
   );
 }
 
-/// 关于弹窗：版本信息 + 组件架构构成 + 作者
+/// 关于弹窗：版本信息 + 项目主页 + 组件架构构成 + 检查更新
 Future<void> showAppAboutDialog(BuildContext context) {
   return showDialog(
     context: context,
-    builder: (ctx) => AlertDialog(
+    builder: (_) => const _AboutDialog(),
+  );
+}
+
+/// 项目主页
+const String kProjectUrl = 'https://github.com/gtyphoon/m3u_player_fvp';
+
+/// 发布页（下载新版本）
+const String kReleasesUrl = '$kProjectUrl/releases';
+
+class _AboutDialog extends StatefulWidget {
+  const _AboutDialog();
+
+  @override
+  State<_AboutDialog> createState() => _AboutDialogState();
+}
+
+class _AboutDialogState extends State<_AboutDialog> {
+  bool _checking = false;
+  bool _failed = false;
+  String? _latest; // 发现的新版本号（非空才显示"前往下载"）
+  String? _result; // 检查结果文案
+
+  Future<void> _openLink(String url) async {
+    final ok = await NativeIO.openUrl(url);
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(L10n.t('打不开浏览器，请手动访问：$url',
+            'Could not open a browser. Please visit: {url}', {'url': url})),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  /// 版本号比较：4.0.6 vs 4.1.0 → -1 / 0 / 1（缺的段按 0 处理）
+  static int _compareVersion(String a, String b) {
+    List<int> parts(String s) => s
+        .split(RegExp(r'[.+\-]'))
+        .map((x) => int.tryParse(x) ?? 0)
+        .toList();
+    final pa = parts(a);
+    final pb = parts(b);
+    final n = max(pa.length, pb.length);
+    for (var i = 0; i < n; i++) {
+      final va = i < pa.length ? pa[i] : 0;
+      final vb = i < pb.length ? pb[i] : 0;
+      if (va != vb) return va > vb ? 1 : -1;
+    }
+    return 0;
+  }
+
+  /// 从 GitHub 取最新 tag：先看 releases/latest，没有发布页就退回 tags 列表
+  Future<String?> _fetchLatestTag() async {
+    const targets = [
+      'https://api.github.com/repos/gtyphoon/m3u_player_fvp/releases/latest',
+      'https://api.github.com/repos/gtyphoon/m3u_player_fvp/tags',
+    ];
+    for (final u in targets) {
+      HttpClient? client;
+      try {
+        client = HttpClient()
+          ..connectionTimeout = const Duration(seconds: 6);
+        final req = await client.getUrl(Uri.parse(u));
+        req.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
+        req.headers.set(
+            HttpHeaders.userAgentHeader, 'm3u-player-fvp-update-check');
+        final resp = await req.close().timeout(const Duration(seconds: 10));
+        if (resp.statusCode != 200) {
+          client.close(force: true);
+          continue;
+        }
+        final body = await resp.transform(utf8.decoder).join();
+        client.close(force: true);
+        final data = jsonDecode(body);
+        if (data is Map && data['tag_name'] is String) {
+          return data['tag_name'] as String;
+        }
+        if (data is List) {
+          final tags = data
+              .whereType<Map>()
+              .map((m) => m['name'])
+              .whereType<String>()
+              .toList();
+          if (tags.isEmpty) continue;
+          tags.sort(_compareVersion);
+          return tags.last;
+        }
+      } catch (_) {
+        client?.close(force: true);
+      }
+    }
+    return null;
+  }
+
+  Future<void> _checkUpdate() async {
+    if (_checking) return;
+    setState(() {
+      _checking = true;
+      _failed = false;
+      _result = null;
+      _latest = null;
+    });
+    final tag = await _fetchLatestTag();
+    if (!mounted) return;
+    if (tag == null) {
+      setState(() {
+        _checking = false;
+        _failed = true;
+        _result = L10n.t('检查失败：网络不可用或 GitHub 访问被拦截，请稍后再试',
+            'Check failed: no network, or GitHub is blocked. Try again later.');
+      });
+      return;
+    }
+    final latest = tag.replaceAll(RegExp('^[vV]'), '').trim();
+    final newer = _compareVersion(latest, kAppVersion) > 0;
+    setState(() {
+      _checking = false;
+      _latest = newer ? latest : null;
+      _result = newer
+          ? L10n.t('发现新版本 $latest（当前 $kAppVersion），可点"前往下载"',
+              'New version {new} available (current {cur}). Tap "Download".',
+              {'new': latest, 'cur': kAppVersion})
+          : L10n.t('已是最新版本（$kAppVersion）',
+              'You are on the latest version ({cur}).', {'cur': kAppVersion});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
       backgroundColor: Colors.blueGrey.shade900,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       title: Text(L10n.t('关于'),
-          style: TextStyle(color: Colors.white, fontSize: 16)),
+          style: const TextStyle(color: Colors.white, fontSize: 16)),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2371,9 +2503,34 @@ Future<void> showAppAboutDialog(BuildContext context) {
             _aboutRow(L10n.t('版本'), '$kAppVersion（build $kAppBuild）'),
             _aboutRow(L10n.t('作者'), kAppAuthor),
             _aboutRow(L10n.t('许可'), kAppLicense),
+            // 项目主页：可点击，点了用系统浏览器打开
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${L10n.t('项目主页')}：',
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 13)),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _openLink(kProjectUrl),
+                      child: Text(
+                        kProjectUrl,
+                        style: const TextStyle(
+                          color: Colors.lightBlueAccent,
+                          fontSize: 13,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 10),
             Text(L10n.t('组件架构构成'),
-                style: TextStyle(
+                style: const TextStyle(
                     color: Colors.lightBlueAccent,
                     fontSize: 14,
                     fontWeight: FontWeight.bold)),
@@ -2384,6 +2541,7 @@ Future<void> showAppAboutDialog(BuildContext context) {
               L10n.t('FFmpeg（HEVC-in-FLV / H.264 硬解与软解）'),
               L10n.t('平台：Android（arm64-v8a / armeabi-v7a / x86_64）'),
               L10n.t('平台：Windows（x64 桌面版）'),
+              L10n.t('平台：Linux（x64 桌面版，Ubuntu / Debian / 麒麟 / Deepin 等）'),
             ])
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),
@@ -2391,18 +2549,75 @@ Future<void> showAppAboutDialog(BuildContext context) {
                     style:
                         const TextStyle(color: Colors.white70, fontSize: 13)),
               ),
+            const SizedBox(height: 12),
+            // 检查更新（联网查 GitHub 最新 tag）
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _checking ? null : _checkUpdate,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.lightBlueAccent,
+                    side: const BorderSide(color: Colors.lightBlueAccent),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  icon: _checking
+                      ? const SizedBox(
+                          width: 13,
+                          height: 13,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.lightBlueAccent),
+                        )
+                      : const Icon(Icons.system_update_alt, size: 15),
+                  label: Text(
+                      _checking
+                          ? L10n.t('检查中…', 'Checking...')
+                          : L10n.t('检查更新', 'Check for updates'),
+                      style: const TextStyle(fontSize: 13)),
+                ),
+                if (_latest != null) ...[
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => _openLink(kReleasesUrl),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.lightBlueAccent,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(L10n.t('前往下载', 'Download'),
+                        style: const TextStyle(fontSize: 13)),
+                  ),
+                ],
+              ],
+            ),
+            if (_result != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  _result!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _failed
+                        ? Colors.orangeAccent
+                        : (_latest != null
+                            ? Colors.lightBlueAccent
+                            : Colors.white70),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(ctx).pop(),
+          onPressed: () => Navigator.of(context).pop(),
           child: Text(L10n.t('知道了'),
-              style: TextStyle(color: Colors.lightBlueAccent, fontSize: 15)),
+              style: const TextStyle(
+                  color: Colors.lightBlueAccent, fontSize: 15)),
         ),
       ],
-    ),
-  );
+    );
+  }
 }
 
 Widget _aboutRow(String key, String value) {

@@ -129,6 +129,25 @@ class MainActivity : FlutterActivity() {
                         publishFileAsync(File(srcPath), name, subdir, mime, result)
                     }
                 }
+                // 打开外部链接（关于页项目主页 / 新版本下载页）
+                "openUrl" -> {
+                    val url = call.argument<String>("url") ?: ""
+                    if (url.isEmpty()) {
+                        result.error("BAD_ARGS", "url is empty", null)
+                    } else {
+                        try {
+                            val intent = Intent(
+                                Intent.ACTION_VIEW,
+                                android.net.Uri.parse(url)
+                            )
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("OPEN_FAILED", e.message, null)
+                        }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
