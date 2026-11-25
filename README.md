@@ -34,7 +34,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 
 > 一句话：**IPTV / 直播 / 监控都能用**——H.265 + H.264 编码、RTSP / HTTP-FLV 协议的组合是优化重点；其它常见格式也能播（软件解码）。
 
-![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows-blue)
+![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows%20%7C%20Linux-blue)
 ![Version](https://img.shields.io/badge/version-4.0.6-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
