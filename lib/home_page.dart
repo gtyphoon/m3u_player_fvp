@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,8 +19,8 @@ const List<int> kLayouts = [1, 2, 4, 5, 6, 7, 8, 16];
 
 // ---------- 应用信息（关于弹窗展示，需与 pubspec.yaml 保持一致） ----------
 const String kAppName = 'M3U播放器';
-const String kAppVersion = '4.0.5';
-const String kAppBuild = '17';
+const String kAppVersion = '4.0.6';
+const String kAppBuild = '18';
 const String kAppAuthor = 'gtyphoon';
 const String kAppLicense = 'MIT License';
 
@@ -96,6 +97,10 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   final Map<String, _Recording> _recordings = {}; // key = 频道 URL
   String _recFormat = 'auto'; // auto / ts / mkv / mp4
   int _recSegmentMin = 30; // 分段时长（分钟），0=不分段
+  bool _confirmBusy = false; // 确认框只允许同时存在一个，避免连点叠窗
+  // 断线重连：当前段收尾后，重连成功要接着录的下一段（name / part / fmt）
+  final Map<String, ({String name, int part, String fmt})> _resumeRec = {};
+  AppLifecycleListener? _lifecycle;
 
   // 全屏播放的频道
   Channel? _fullscreenChannel;
@@ -127,6 +132,15 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     _loadPrefs();
     _poke();
     _loadSavedM3U();
+    // 桌面端（Windows 点窗口关闭按钮）：有录制时先确认，取消则窗口不退出
+    _lifecycle = AppLifecycleListener(onExitRequested: _onExitRequested);
+  }
+
+  /// 系统请求退出程序（Windows 关闭窗口）时的处理
+  Future<AppExitResponse> _onExitRequested() async {
+    if (_recordings.isEmpty) return AppExitResponse.exit;
+    final ok = await _confirmDestroy(const {});
+    return ok ? AppExitResponse.exit : AppExitResponse.cancel;
   }
 
   @override
@@ -136,6 +150,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       HardwareKeyboard.instance.removeHandler(_hardKey);
     }
     _hideTimer?.cancel();
+    _lifecycle?.dispose();
     _gridScroll.dispose();
     for (final t in _retryTimers.values) {
       t.cancel();
@@ -471,18 +486,22 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     for (final c in channels) {
       if (c.group.isNotEmpty) groups.add(c.group);
     }
-    _update(() {
-      _allChannels = channels;
-      _groups = groups.toList();
-      _group = '全部';
-      _quality = '清晰';
-      // 布局/列/行/预加载等 UI 偏好保留，不随新列表重置
-      _page = 1;
-      _loaded = true;
-      _checking = false;
-    });
-    // 不保存：避免在 _restorePrefs 之前覆盖用户配置
-    _showTip(L10n.t('已加载 $label（${channels.length} 路）', 'Loaded {label} ({n} channels)', {'label': label, 'n': channels.length}));
+    _guardedApply(const <String>{}, () {
+      _update(() {
+        _allChannels = channels;
+        _groups = groups.toList();
+        _group = '全部';
+        _quality = '清晰';
+        // 布局/列/行/预加载等 UI 偏好保留，不随新列表重置
+        _page = 1;
+        _loaded = true;
+        _checking = false;
+      });
+      // 不保存：避免在 _restorePrefs 之前覆盖用户配置
+      _showTip(L10n.t('已加载 $label（${channels.length} 路）',
+          'Loaded {label} ({n} channels)',
+          {'label': label, 'n': channels.length}));
+    })();
   }
 
   void _showTip(String msg) {
@@ -518,43 +537,43 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     return list.sublist(start, min(start + _layout, list.length));
   }
 
-  /// 预加载频道：当前页之后的连续 N 路（跨页），只建播放器不显示格子
-  List<Channel> get _preloadChannels {
-    if (_preload <= 0) return const [];
-    final list = _filtered;
-    final start = (_page - 1) * _layout + _layout;
-    if (start >= list.length) return const [];
-    final end = min(start + _preload, list.length);
-    return list.sublist(start, end);
-  }
-
   // ---------- 操作 ----------
 
   void _changeLayout(int n) {
-    _update(() {
-      _layout = n.clamp(1, 16).toInt();
-      _page = 1;
-      _poke();
-    });
-    _savePrefs();
+    final v = n.clamp(1, 16).toInt();
+    // 换布局会重排整页，旧页播放器被销毁：录制中先确认
+    _guardedApply(_desiredUrlsFor(page: 1, cells: v), () {
+      _update(() {
+        _layout = v;
+        _page = 1;
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   void _changeColumns(int c) {
-    _update(() {
-      _columns = c.clamp(0, 4).toInt();
-      _page = 1;
-      _poke();
-    });
-    _savePrefs();
+    final v = c.clamp(0, 4).toInt();
+    _guardedApply(_desiredUrlsFor(page: 1), () {
+      _update(() {
+        _columns = v;
+        _page = 1;
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   void _changeRows(int r) {
-    _update(() {
-      _rows = r.clamp(0, 4).toInt();
-      _page = 1;
-      _poke();
-    });
-    _savePrefs();
+    final v = r.clamp(0, 4).toInt();
+    _guardedApply(_desiredUrlsFor(page: 1), () {
+      _update(() {
+        _rows = v;
+        _page = 1;
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   void _changePreload(int n) {
@@ -566,13 +585,16 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   }
 
   void _changeGroup(String g) {
-    _update(() {
-      _group = g;
-      _page = 1;
-      _gridFocusIndex = 0; // 切换分组后焦点回到第一个格子
-      _poke();
-    });
-    _savePrefs();
+    // 切分组会整页换频道：录制中先确认
+    _guardedApply(_desiredUrlsFor(group: g, page: 1), () {
+      _update(() {
+        _group = g;
+        _page = 1;
+        _gridFocusIndex = 0; // 切换分组后焦点回到第一个格子
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   /// 系统 LEANBACK 特性检测是否为电视
@@ -625,13 +647,16 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   }
 
   void _changeQuality(String q) {
-    _update(() {
-      _quality = q;
-      _page = 1;
-      _gridFocusIndex = 0; // 切换码流后焦点回到第一个格子
-      _poke();
-    });
-    _savePrefs();
+    // 切码流会整页换频道：录制中先确认
+    _guardedApply(_desiredUrlsFor(quality: q, page: 1), () {
+      _update(() {
+        _quality = q;
+        _page = 1;
+        _gridFocusIndex = 0; // 切换码流后焦点回到第一个格子
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   void _changeDecoder(String v) {
@@ -725,6 +750,15 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     final base = _pendingPage > 0 ? _pendingPage : _page;
     final next = (base + delta).clamp(1, tp);
     if (next == _displayPage) return;
+    // 翻页会销毁旧页的播放器：旧页若有录制，先弹确认（取消 = 不停止录制、也不翻页）
+    unawaited(_turnPageTo(next));
+  }
+
+  /// 翻到指定页：确认录制后再真正切页
+  Future<void> _turnPageTo(int next) async {
+    if (!mounted || next == _displayPage) return;
+    if (!await _confirmDestroy(_desiredUrlsFor(page: next))) return;
+    if (!mounted || next == _displayPage) return;
     // 进入切换状态：快速翻页期间不触发播放器同步
     _isSwitching = true;
     _pendingPage = next;
@@ -871,7 +905,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       }
       final now = DateTime.now();
       if (_lastBackTs != null && now.difference(_lastBackTs!).inSeconds < 2) {
-        SystemNavigator.pop();
+        _lastBackTs = null;
+        unawaited(_exitApp()); // 有录制时先弹确认
         return true;
       }
       _lastBackTs = now;
@@ -981,16 +1016,122 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   // ---------- 共享播放器池 ----------
 
-  Set<String> _desiredUrls() {
+  /// 某个筛选/页码/布局下会保留的播放器 URL。
+  /// 翻页、切分组、切码流之前先用它预演"哪些路会被销毁"，据此决定要不要弹确认框。
+  Set<String> _desiredUrlsFor(
+      {int? page, String? group, String? quality, int? cells}) {
+    final g = group ?? _group;
+    final q = quality ?? _quality;
+    final p = page ?? _page;
+    final n = cells ?? _layout;
+    final list = _allChannels.where((c) {
+      final matchGroup = g == '全部' || c.group == g;
+      final matchQuality =
+          c.quality == '自动' || c.quality.isEmpty || c.quality == q;
+      return matchGroup && matchQuality;
+    }).toList();
     final set = <String>{};
-    for (final c in _pageChannels) {
-      set.add(c.url);
+    final start = (p - 1) * n;
+    if (start < list.length) {
+      for (final c in list.sublist(start, min(start + n, list.length))) {
+        set.add(c.url);
+      }
     }
     // 预加载：下一页的路数提前建好播放器，翻页即出画面
-    for (final c in _preloadChannels) {
-      set.add(c.url);
+    final ps = start + n;
+    if (_preload > 0 && ps < list.length) {
+      for (final c in list.sublist(ps, min(ps + _preload, list.length))) {
+        set.add(c.url);
+      }
     }
     return set;
+  }
+
+  Set<String> _desiredUrls() => _desiredUrlsFor();
+
+  /// 通道即将被销毁前的统一确认（翻页 / 切分组 / 切码流 / 换布局 / 换列表 / 退出软件）。
+  /// [nextDesired] = 操作完成后仍会保留的 URL 集合，不在其中的录制路会被关掉。
+  /// 返回 true：可以继续（用户同意时这些录制已停止并保存）；false：取消本次操作。
+  Future<bool> _confirmDestroy(Set<String> nextDesired) async {
+    final gone =
+        _recordings.keys.where((u) => !nextDesired.contains(u)).toList();
+    if (gone.isEmpty) return true;
+    if (!mounted || _confirmBusy) return false;
+    _confirmBusy = true;
+    try {
+      final names = gone
+          .map((u) => _recordings[u]?.name ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      final action = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: Text(
+            L10n.t('${names.length} 路正在录制', '{n} channel(s) recording',
+                {'n': names.length}),
+            style: const TextStyle(fontSize: 16, color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                L10n.t('继续操作会关闭这些画面，录制必须一起停止（已录内容会保存）：',
+                    'These channels will be closed, so their recordings must stop. Everything recorded so far is saved:'),
+                style: const TextStyle(fontSize: 13, color: Colors.white70),
+              ),
+              const SizedBox(height: 8),
+              for (final n in names)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text('· $n',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(fontSize: 13, color: Colors.white)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('cancel'),
+              child: Text(L10n.t('取消（继续录制）', 'Cancel (keep recording)'),
+                  style: const TextStyle(fontSize: 13)),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.of(ctx).pop('stop'),
+              child: Text(L10n.t('停止录制并继续', 'Stop recording and go on'),
+                  style: const TextStyle(fontSize: 13)),
+            ),
+          ],
+        ),
+      );
+      if (action != 'stop') return false;
+      for (final u in gone) {
+        await _stopRecording(u, notify: false);
+      }
+      if (mounted) {
+        _showTip(L10n.t('已停止 ${gone.length} 路录制，文件已保存',
+            'Stopped {n} recording(s), files saved', {'n': gone.length}));
+      }
+      return true;
+    } finally {
+      _confirmBusy = false;
+    }
+  }
+
+  /// 会销毁播放器的设置变更：先过确认，再执行
+  VoidCallback _guardedApply(Set<String> nextDesired, VoidCallback apply) {
+    return () {
+      unawaited(() async {
+        if (!await _confirmDestroy(nextDesired)) return;
+        if (!mounted) return;
+        apply();
+      }());
+    };
   }
 
   /// 同步池与当前页：创建缺失的、释放不再显示的（切换期间跳过，避免频繁重建崩溃）
@@ -1045,6 +1186,11 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       }
       c.play();
       setState(() {});
+      // 断线重连后自动接着录（新的一段文件），不让网络抖动把录制丢掉
+      final resume = _resumeRec.remove(url);
+      if (resume != null && _pool[url] == c && !_recordings.containsKey(url)) {
+        unawaited(_resumeRecording(url, c, resume));
+      }
       // 首帧兜底：open 成功后 5 秒内既无首帧也无错误（流不兼容/卡死），提示并重连
       _retryTimers[url]?.cancel();
       _retryTimers[url] = Timer(Duration(seconds: _firstFrameTimeout), () {
@@ -1064,12 +1210,19 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     });
   }
 
-  void _destroy(String url) {
-    if (_recordings.containsKey(url)) {
-      // 画面被切走/关闭：先把录制停掉并保存，再销毁播放器
-      unawaited(_stopRecording(url, notify: false).then((_) {
-        if (mounted) _showTip(L10n.t('该路画面已切换，录制已停止并保存'));
-      }));
+  void _destroy(String url, {bool preserveRecording = false}) {
+    final rec = _recordings[url];
+    if (rec != null) {
+      if (preserveRecording) {
+        // 断线重连：当前段先收尾存盘，重连成功后自动接着录下一段
+        _resumeRec[url] = (name: rec.name, part: rec.part + 1, fmt: rec.fmt);
+        unawaited(_stopRecording(url, notify: false));
+      } else {
+        // 画面被切走/关闭：先把录制停掉并保存，再销毁播放器
+        unawaited(_stopRecording(url, notify: false).then((_) {
+          if (mounted) _showTip(L10n.t('该路画面已切换，录制已停止并保存'));
+        }));
+      }
     }
     _retryTimers[url]?.cancel();
     _retryTimers.remove(url);
@@ -1109,8 +1262,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       _retryPending.remove(url);
       _retryTimers.remove(url);
       if (!mounted) return;
-      // 重建该路播放器
-      _destroy(url);
+      // 重建该路播放器（重连，不打断录制）
+      _destroy(url, preserveRecording: true);
       _create(url);
       setState(() {});
     });
@@ -1183,11 +1336,23 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     // 连续两次返回才退出
     final now = DateTime.now();
     if (_lastBackTs != null && now.difference(_lastBackTs!).inSeconds < 2) {
-      SystemNavigator.pop();
+      _lastBackTs = null;
+      await _exitApp();
       return;
     }
     _lastBackTs = now;
     _showTip(L10n.t('再按一次返回键退出'));
+  }
+
+  /// 退出软件：有录制时先确认（取消 = 不退出、录制继续）
+  Future<void> _exitApp() async {
+    if (!mounted) return;
+    if (!await _confirmDestroy(const <String>{})) {
+      _lastBackTs = null;
+      if (mounted) _showTip(L10n.t('已取消退出，录制继续', 'Exit cancelled, recording continues'));
+      return;
+    }
+    SystemNavigator.pop();
   }
 
   @override
@@ -1698,6 +1863,39 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
           : L10n.t('录制启动失败，请检查保存目录'));
     } catch (_) {
       _showTip(L10n.t('录制启动失败，请检查保存目录'));
+    }
+  }
+
+  /// 断线重连后接着录制：新播放器 + 新一段文件（part 递增），不弹"已开始录制"
+  Future<void> _resumeRecording(String url, NativePlayerController c,
+      ({String name, int part, String fmt}) r) async {
+    try {
+      final path = await CaptureStore.recordingPath(r.name, _captureDir,
+          part: r.part, format: r.fmt);
+      if (!mounted ||
+          _pool[url] != c ||
+          _recordings.containsKey(url) ||
+          !c.value.isInitialized) {
+        return;
+      }
+      if (!c.startRecord(path, format: r.fmt)) return;
+      final rec = _Recording(
+        url: url,
+        name: r.name,
+        controller: c,
+        part: r.part,
+        path: path,
+        fmt: r.fmt,
+        startedAt: DateTime.now(),
+      );
+      _recordings[url] = rec;
+      _scheduleSegment(rec);
+      _scheduleCheck(rec);
+      if (mounted) setState(() {});
+      _showTip(L10n.t('画面已重连，录制自动继续（新的一段文件）',
+          'Reconnected; recording resumed in a new segment'));
+    } catch (_) {
+      // 续录失败：保持已保存的前一段，不再打扰用户
     }
   }
 
@@ -3089,58 +3287,12 @@ class _FullscreenPageState extends State<_FullscreenPage> {
       ));
   }
 
-  /// 退出全屏统一入口：录制中必须由用户确认如何处理录制
+  /// 退出全屏统一入口：只回到网格，画面继续播放、录制继续。
+  /// 录制真正的停止时机是"这路通道被销毁之前"，由主页 _confirmDestroy 统一确认，
+  /// 所以退出全屏不再打扰用户。
   Future<void> _requestExit() async {
     if (!mounted) return;
-    if (!_rec) {
-      Navigator.of(context).pop();
-      return;
-    }
-    final action = await showDialog<String>(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text(L10n.t('正在录制', 'Recording in progress'),
-            style: const TextStyle(fontSize: 16, color: Colors.white)),
-        content: Text(
-          L10n.t('退出全屏前请先确认：停止录制，或在后台继续录制。',
-              'Please confirm what to do with the recording before leaving.'),
-          style: const TextStyle(fontSize: 13, color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop('cancel'),
-            child: Text(L10n.t('取消', 'Cancel'),
-                style: const TextStyle(fontSize: 13)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop('keep'),
-            child: Text(L10n.t('继续录制并退出', 'Keep recording'),
-                style: const TextStyle(fontSize: 13)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            onPressed: () => Navigator.of(ctx).pop('stop'),
-            child: Text(L10n.t('停止录制并退出', 'Stop and exit'),
-                style: const TextStyle(fontSize: 13)),
-          ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    switch (action) {
-      case 'stop':
-        await widget.onStopRecord?.call();
-        if (mounted) {
-          setState(() => _rec = false);
-          Navigator.of(context).pop();
-        }
-      case 'keep':
-        Navigator.of(context).pop();
-      default:
-        break; // 取消：留在全屏继续录制
-    }
+    Navigator.of(context).pop();
   }
 
   @override
@@ -3150,7 +3302,7 @@ class _FullscreenPageState extends State<_FullscreenPage> {
     // 出首帧才算有画面；open 成功但无帧时显示加载提示
     final showFrame = c != null && c.value.hasFrame;
     return PopScope(
-      canPop: !_rec, // 录制中拦下系统返回键，走确认框
+      canPop: true, // 退出全屏只回网格，录制在后台继续；停止录制的确认在"通道销毁前"
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _requestExit();
       },

@@ -35,7 +35,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 > 一句话：**IPTV / 直播 / 监控都能用**——H.265 + H.264 编码、RTSP / HTTP-FLV 协议的组合是优化重点；其它常见格式也能播（软件解码）。
 
 ![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows-blue)
-![Version](https://img.shields.io/badge/version-4.0.5-green)
+![Version](https://img.shields.io/badge/version-4.0.6-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 ---
@@ -69,7 +69,7 @@ MDK 和 FFmpeg 不是单独的插件，而是**随 fvp 一起打包的底层引�
 | Android 老设备（32 位） | `app-armeabi-v7a-release.apk` | 同上 |
 | Android 模拟器 / 特殊 x86 设备 | `app-x86_64-release.apk` | 同上 |
 | Windows 电脑（64 位） | `m3u_player-windows.zip` | 解压到电脑任意目录（建议 `D:\m3u_player`），双击里面的 exe 即可运行 |
-| Linux 电脑（x86_64 桌面，Ubuntu / Debian / 麒麟 / Deepin / Fedora / Arch 等） | `M3U_player_v4.0.5_linux-x64.tar.gz` | 解压后进入文件夹，双击 `m3u_player_fvp`（或终端执行 `./m3u_player_fvp`）；包内附《使用说明.txt》 |
+| Linux 电脑（x86_64 桌面，Ubuntu / Debian / 麒麟 / Deepin / Fedora / Arch 等） | `M3U_player_v4.0.6_linux-x64.tar.gz` | 解压后进入文件夹，双击 `m3u_player_fvp`（或终端执行 `./m3u_player_fvp`）；包内附《使用说明.txt》 |
 
 > ⚠️ Windows 版特别提醒：
 > - Windows 版以 **zip 压缩包**发布，下载后**先解压再运行**，解压出来的文件夹要保持完整（别把 exe 单独拷出来），双击里面的 `m3u_player_fvp.exe` 即可。
@@ -256,11 +256,11 @@ flutter build linux --release
 3. 打包发布（连同许可文件一起压缩）：
 
 ```bash
-mkdir -p /tmp/pkg/M3U_player_v4.0.5_linux-x64
-cp -a build/linux/x64/release/bundle/. /tmp/pkg/M3U_player_v4.0.5_linux-x64/
-cp LICENSE THIRD_PARTY_LICENSES.md /tmp/pkg/M3U_player_v4.0.5_linux-x64/
-cp -a LICENSES /tmp/pkg/M3U_player_v4.0.5_linux-x64/
-cd /tmp/pkg && tar -czf M3U_player_v4.0.5_linux-x64.tar.gz M3U_player_v4.0.5_linux-x64
+mkdir -p /tmp/pkg/M3U_player_v4.0.6_linux-x64
+cp -a build/linux/x64/release/bundle/. /tmp/pkg/M3U_player_v4.0.6_linux-x64/
+cp LICENSE THIRD_PARTY_LICENSES.md /tmp/pkg/M3U_player_v4.0.6_linux-x64/
+cp -a LICENSES /tmp/pkg/M3U_player_v4.0.6_linux-x64/
+cd /tmp/pkg && tar -czf M3U_player_v4.0.6_linux-x64.tar.gz M3U_player_v4.0.6_linux-x64
 ```
 
 > 说明：项目已包含 `linux/` 平台脚手架（`linux/runner`、`linux/flutter`、`CMakeLists.txt`），无需再执行 `flutter create --platforms=linux .`（真跑了会把 `.metadata` 里的 windows 条目冲掉，并顺手升级 `pubspec.lock` 的依赖版本）。
@@ -269,7 +269,7 @@ cd /tmp/pkg && tar -czf M3U_player_v4.0.5_linux-x64.tar.gz M3U_player_v4.0.5_lin
 
 **改频道清单** → 打开项目根目录或 exe 目录下的 `my_channels.m3u`（没有就新建一个），按[第三节](#三频道清单-m3u-怎么写)的格式写。也可以在软件里点"加载 M3U 文件"直接导入。
 
-**改软件版本号** → 打开 `pubspec.yaml`，找到 `version: 4.0.5+17` 这一行，改成你想要的（格式：`主版本.次版本.修订号+构建号`，例如 `4.1.0+13`）。改完重新构建即可生效。
+**改软件版本号** → 打开 `pubspec.yaml`，找到 `version: 4.0.6+18` 这一行，改成你想要的（格式：`主版本.次版本.修订号+构建号`，例如 `4.1.0+13`）。改完重新构建即可生效。
 
 **改默认参数（比如默认清晰度、默认加载几路）** → 打开 `lib/home_page.dart`，文件靠上位置的这些行就是默认值：
 
@@ -473,6 +473,7 @@ A：不能。Flutter 的 Linux 构建需要 Linux 系统上的 clang/GTK3 工具
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| **v4.0.6** | 2026-11 | 停止录制的确认时机改到「通道销毁前」：翻页/切分组/切码流/换布局/换列表/退出软件时若有录制，汇总弹窗确认（取消=不翻页也不停录）；退出全屏不再弹窗、录制继续；断线重连自动续录新一段 |
 | **v4.0.5** | 2026-11 | 网格录制标记从画面左上角移到频道名同一行（左上角会被顶部信息条的黑渐变和菜单按钮遮住，录制时看不到 REC） |
 | **v4.0.4** | 2026-11 | 自动规则再简化：H.264 全平台统一输出 TS（不再区分 Android），H.265 全平台统一输出 MKV |
 | **v4.0.3** | 2026-11 | 按实测修正自动规则：H.265（HEVC）在所有平台一律输出 MKV（Android 上写 MP4 同样只有一帧，此前版本会出废文件）；H.264 桌面仍为 TS、Android 为 MP4 |
