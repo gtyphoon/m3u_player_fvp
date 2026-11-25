@@ -3,6 +3,11 @@
     tools:overrideLibrary="io.flutter.plugins.flutter_plugin_android_lifecycle">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <!-- 截图/录制保存到公共"下载/M3U播放器"：API 24~28 需要写外部存储权限，
+         API 29+ 走 MediaStore 免权限（maxSdkVersion 限制只申请到 28） -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28"/>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <!-- 自写内核不依赖 lifecycle API，强制放行以支持 Android 6（minSdk 23）电视 -->

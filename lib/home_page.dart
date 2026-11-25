@@ -1,6 +1,8 @@
-﻿import 'dart:async';
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +10,7 @@ import 'package:flutter/gestures.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'native_player.dart';
 import 'native_io.dart';
+import 'capture_store.dart';
 
 import 'm3u_parser.dart';
 import 'l10n.dart';
@@ -17,10 +20,19 @@ const List<int> kLayouts = [1, 2, 4, 5, 6, 7, 8, 16];
 
 // ---------- 应用信息（关于弹窗展示，需与 pubspec.yaml 保持一致） ----------
 const String kAppName = 'M3U播放器';
-const String kAppVersion = '4.0.0';
-const String kAppBuild = '12';
+const String kAppVersion = '4.0.6';
+const String kAppBuild = '18';
 const String kAppAuthor = 'gtyphoon';
 const String kAppLicense = 'MIT License';
+
+/// 截图失败提示文案（错误码 → 可操作说明），网格与全屏页共用
+String captureErrorText(String? code) => switch (code) {
+      'PERMISSION_DENIED' => L10n.t(
+          '需要存储权限才能保存截图，请在系统设置里允许本软件使用存储',
+          'Storage permission is required to save screenshots. Allow it in system settings.'),
+      'no_frame' => L10n.t('截图失败，可能暂无画面'),
+      _ => L10n.t('截图失败，请检查保存目录'),
+    };
 
 /// 面板形态：auto=自动适配（竖屏底部/宽屏左侧），left=强制左侧抽屉，bottom=强制底部
 enum PanelStyle { auto, left, bottom }
@@ -79,6 +91,18 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   // 方向锁定：null=自动，landscape=强制横屏，portrait=强制竖屏
   String? _orientationLock = kIsDesktop ? 'landscape' : 'portrait';
 
+  // 截图保存目录（桌面端可自定义；空=程序所在目录）
+  String? _captureDir;
+
+  // ---------- 录制 ----------
+  final Map<String, _Recording> _recordings = {}; // key = 频道 URL
+  String _recFormat = 'auto'; // auto / ts / mkv / mp4
+  int _recSegmentMin = 30; // 分段时长（分钟），0=不分段
+  bool _confirmBusy = false; // 确认框只允许同时存在一个，避免连点叠窗
+  // 断线重连：当前段收尾后，重连成功要接着录的下一段（name / part / fmt）
+  final Map<String, ({String name, int part, String fmt})> _resumeRec = {};
+  AppLifecycleListener? _lifecycle;
+
   // 全屏播放的频道
   Channel? _fullscreenChannel;
 
@@ -109,6 +133,15 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     _loadPrefs();
     _poke();
     _loadSavedM3U();
+    // 桌面端（Windows 点窗口关闭按钮）：有录制时先确认，取消则窗口不退出
+    _lifecycle = AppLifecycleListener(onExitRequested: _onExitRequested);
+  }
+
+  /// 系统请求退出程序（Windows 关闭窗口）时的处理
+  Future<AppExitResponse> _onExitRequested() async {
+    if (_recordings.isEmpty) return AppExitResponse.exit;
+    final ok = await _confirmDestroy(const {});
+    return ok ? AppExitResponse.exit : AppExitResponse.cancel;
   }
 
   @override
@@ -118,6 +151,7 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       HardwareKeyboard.instance.removeHandler(_hardKey);
     }
     _hideTimer?.cancel();
+    _lifecycle?.dispose();
     _gridScroll.dispose();
     for (final t in _retryTimers.values) {
       t.cancel();
@@ -242,6 +276,20 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     _heartbeatTimeout = await NativeIO.prefsGetInt('heartbeat_timeout') ?? 5;
     _bufferSeconds = await NativeIO.prefsGetInt('buffer_seconds') ?? 0;
     _reconnectDelayMax = await NativeIO.prefsGetInt('reconnect_delay_max') ?? 7;
+    final captureDir = await NativeIO.prefsGetString('capture_dir');
+    _captureDir = (captureDir == null || captureDir.trim().isEmpty)
+        ? null
+        : captureDir.trim();
+    final recFormat = await NativeIO.prefsGetString('rec_format');
+    final recMigrated = await NativeIO.prefsGetString('rec_format_auto');
+    if (recMigrated == null || recMigrated.isEmpty) {
+      // 首次运行新版：默认改为"自动"，把旧版的默认值一次性迁移过来
+      _recFormat = 'auto';
+      NativeIO.prefsSetBatch({'rec_format': 'auto', 'rec_format_auto': '1'});
+    } else {
+      _recFormat = (recFormat == null || recFormat.isEmpty) ? 'auto' : recFormat;
+    }
+    _recSegmentMin = await NativeIO.prefsGetInt('rec_segment_min') ?? 30;
     if (mounted) setState(() {});
   }
 
@@ -266,6 +314,10 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       'heartbeat_timeout': '$_heartbeatTimeout',
       'buffer_seconds': '$_bufferSeconds',
       'reconnect_delay_max': '$_reconnectDelayMax',
+      'capture_dir': _captureDir ?? '',
+      'rec_format': _recFormat,
+      'rec_format_auto': '1',
+      'rec_segment_min': '$_recSegmentMin',
     });
   }
 
@@ -435,18 +487,22 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     for (final c in channels) {
       if (c.group.isNotEmpty) groups.add(c.group);
     }
-    _update(() {
-      _allChannels = channels;
-      _groups = groups.toList();
-      _group = '全部';
-      _quality = '清晰';
-      // 布局/列/行/预加载等 UI 偏好保留，不随新列表重置
-      _page = 1;
-      _loaded = true;
-      _checking = false;
-    });
-    // 不保存：避免在 _restorePrefs 之前覆盖用户配置
-    _showTip(L10n.t('已加载 $label（${channels.length} 路）', 'Loaded {label} ({n} channels)', {'label': label, 'n': channels.length}));
+    _guardedApply(const <String>{}, () {
+      _update(() {
+        _allChannels = channels;
+        _groups = groups.toList();
+        _group = '全部';
+        _quality = '清晰';
+        // 布局/列/行/预加载等 UI 偏好保留，不随新列表重置
+        _page = 1;
+        _loaded = true;
+        _checking = false;
+      });
+      // 不保存：避免在 _restorePrefs 之前覆盖用户配置
+      _showTip(L10n.t('已加载 $label（${channels.length} 路）',
+          'Loaded {label} ({n} channels)',
+          {'label': label, 'n': channels.length}));
+    })();
   }
 
   void _showTip(String msg) {
@@ -482,43 +538,43 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     return list.sublist(start, min(start + _layout, list.length));
   }
 
-  /// 预加载频道：当前页之后的连续 N 路（跨页），只建播放器不显示格子
-  List<Channel> get _preloadChannels {
-    if (_preload <= 0) return const [];
-    final list = _filtered;
-    final start = (_page - 1) * _layout + _layout;
-    if (start >= list.length) return const [];
-    final end = min(start + _preload, list.length);
-    return list.sublist(start, end);
-  }
-
   // ---------- 操作 ----------
 
   void _changeLayout(int n) {
-    _update(() {
-      _layout = n.clamp(1, 16).toInt();
-      _page = 1;
-      _poke();
-    });
-    _savePrefs();
+    final v = n.clamp(1, 16).toInt();
+    // 换布局会重排整页，旧页播放器被销毁：录制中先确认
+    _guardedApply(_desiredUrlsFor(page: 1, cells: v), () {
+      _update(() {
+        _layout = v;
+        _page = 1;
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   void _changeColumns(int c) {
-    _update(() {
-      _columns = c.clamp(0, 4).toInt();
-      _page = 1;
-      _poke();
-    });
-    _savePrefs();
+    final v = c.clamp(0, 4).toInt();
+    _guardedApply(_desiredUrlsFor(page: 1), () {
+      _update(() {
+        _columns = v;
+        _page = 1;
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   void _changeRows(int r) {
-    _update(() {
-      _rows = r.clamp(0, 4).toInt();
-      _page = 1;
-      _poke();
-    });
-    _savePrefs();
+    final v = r.clamp(0, 4).toInt();
+    _guardedApply(_desiredUrlsFor(page: 1), () {
+      _update(() {
+        _rows = v;
+        _page = 1;
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   void _changePreload(int n) {
@@ -530,13 +586,16 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
   }
 
   void _changeGroup(String g) {
-    _update(() {
-      _group = g;
-      _page = 1;
-      _gridFocusIndex = 0; // 切换分组后焦点回到第一个格子
-      _poke();
-    });
-    _savePrefs();
+    // 切分组会整页换频道：录制中先确认
+    _guardedApply(_desiredUrlsFor(group: g, page: 1), () {
+      _update(() {
+        _group = g;
+        _page = 1;
+        _gridFocusIndex = 0; // 切换分组后焦点回到第一个格子
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   /// 系统 LEANBACK 特性检测是否为电视
@@ -560,14 +619,45 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     if (mounted) setState(() {});
   }
 
-  void _changeQuality(String q) {
-    _update(() {
-      _quality = q;
-      _page = 1;
-      _gridFocusIndex = 0; // 切换码流后焦点回到第一个格子
-      _poke();
-    });
+  /// 截图保存目录（高级设置里改，null=程序所在目录）
+  void _setCaptureDir(String? dir) {
+    _captureDir = (dir == null || dir.trim().isEmpty) ? null : dir.trim();
     _savePrefs();
+    if (mounted) setState(() {});
+  }
+
+  /// 录制封装格式（只影响之后新开的录制，已在录的继续用原格式）
+  void _setRecFormat(String f) {
+    if (!_recordings.isEmpty) {
+      _showTip(L10n.t('录制中不能切换封装格式，请先停止录制'));
+      return;
+    }
+    _recFormat = f;
+    _savePrefs();
+    if (mounted) setState(() {});
+  }
+
+  /// 分段时长（分钟），0=不分段；录制中切换从下一段生效
+  void _setRecSegment(int min) {
+    _recSegmentMin = min.clamp(0, 240);
+    _savePrefs();
+    for (final rec in _recordings.values) {
+      _scheduleSegment(rec);
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _changeQuality(String q) {
+    // 切码流会整页换频道：录制中先确认
+    _guardedApply(_desiredUrlsFor(quality: q, page: 1), () {
+      _update(() {
+        _quality = q;
+        _page = 1;
+        _gridFocusIndex = 0; // 切换码流后焦点回到第一个格子
+        _poke();
+      });
+      _savePrefs();
+    })();
   }
 
   void _changeDecoder(String v) {
@@ -661,6 +751,15 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     final base = _pendingPage > 0 ? _pendingPage : _page;
     final next = (base + delta).clamp(1, tp);
     if (next == _displayPage) return;
+    // 翻页会销毁旧页的播放器：旧页若有录制，先弹确认（取消 = 不停止录制、也不翻页）
+    unawaited(_turnPageTo(next));
+  }
+
+  /// 翻到指定页：确认录制后再真正切页
+  Future<void> _turnPageTo(int next) async {
+    if (!mounted || next == _displayPage) return;
+    if (!await _confirmDestroy(_desiredUrlsFor(page: next))) return;
+    if (!mounted || next == _displayPage) return;
     // 进入切换状态：快速翻页期间不触发播放器同步
     _isSwitching = true;
     _pendingPage = next;
@@ -779,8 +878,14 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       if (event is KeyRepeatEvent) return true; // 长按只触发一次
       if (event is! KeyDownEvent) return true;
       if (_fullscreenChannel != null) {
-        _fullscreenChannel = null; // 立即清除，防止重复触发 pop
-        Navigator.of(context).pop();
+        // 录制中不能静默退出：交给全屏页的确认流程
+        final req = _exitFullscreenRequest;
+        if (req != null) {
+          req();
+        } else {
+          _fullscreenChannel = null; // 立即清除，防止重复触发 pop
+          Navigator.of(context).pop();
+        }
         return true;
       }
       if (_panelOpen) {
@@ -801,7 +906,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       }
       final now = DateTime.now();
       if (_lastBackTs != null && now.difference(_lastBackTs!).inSeconds < 2) {
-        SystemNavigator.pop();
+        _lastBackTs = null;
+        unawaited(_exitApp()); // 有录制时先弹确认
         return true;
       }
       _lastBackTs = now;
@@ -911,16 +1017,122 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
 
   // ---------- 共享播放器池 ----------
 
-  Set<String> _desiredUrls() {
+  /// 某个筛选/页码/布局下会保留的播放器 URL。
+  /// 翻页、切分组、切码流之前先用它预演"哪些路会被销毁"，据此决定要不要弹确认框。
+  Set<String> _desiredUrlsFor(
+      {int? page, String? group, String? quality, int? cells}) {
+    final g = group ?? _group;
+    final q = quality ?? _quality;
+    final p = page ?? _page;
+    final n = cells ?? _layout;
+    final list = _allChannels.where((c) {
+      final matchGroup = g == '全部' || c.group == g;
+      final matchQuality =
+          c.quality == '自动' || c.quality.isEmpty || c.quality == q;
+      return matchGroup && matchQuality;
+    }).toList();
     final set = <String>{};
-    for (final c in _pageChannels) {
-      set.add(c.url);
+    final start = (p - 1) * n;
+    if (start < list.length) {
+      for (final c in list.sublist(start, min(start + n, list.length))) {
+        set.add(c.url);
+      }
     }
     // 预加载：下一页的路数提前建好播放器，翻页即出画面
-    for (final c in _preloadChannels) {
-      set.add(c.url);
+    final ps = start + n;
+    if (_preload > 0 && ps < list.length) {
+      for (final c in list.sublist(ps, min(ps + _preload, list.length))) {
+        set.add(c.url);
+      }
     }
     return set;
+  }
+
+  Set<String> _desiredUrls() => _desiredUrlsFor();
+
+  /// 通道即将被销毁前的统一确认（翻页 / 切分组 / 切码流 / 换布局 / 换列表 / 退出软件）。
+  /// [nextDesired] = 操作完成后仍会保留的 URL 集合，不在其中的录制路会被关掉。
+  /// 返回 true：可以继续（用户同意时这些录制已停止并保存）；false：取消本次操作。
+  Future<bool> _confirmDestroy(Set<String> nextDesired) async {
+    final gone =
+        _recordings.keys.where((u) => !nextDesired.contains(u)).toList();
+    if (gone.isEmpty) return true;
+    if (!mounted || _confirmBusy) return false;
+    _confirmBusy = true;
+    try {
+      final names = gone
+          .map((u) => _recordings[u]?.name ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      final action = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: Text(
+            L10n.t('${names.length} 路正在录制', '{n} channel(s) recording',
+                {'n': names.length}),
+            style: const TextStyle(fontSize: 16, color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                L10n.t('继续操作会关闭这些画面，录制必须一起停止（已录内容会保存）：',
+                    'These channels will be closed, so their recordings must stop. Everything recorded so far is saved:'),
+                style: const TextStyle(fontSize: 13, color: Colors.white70),
+              ),
+              const SizedBox(height: 8),
+              for (final n in names)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text('· $n',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(fontSize: 13, color: Colors.white)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('cancel'),
+              child: Text(L10n.t('取消（继续录制）', 'Cancel (keep recording)'),
+                  style: const TextStyle(fontSize: 13)),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.of(ctx).pop('stop'),
+              child: Text(L10n.t('停止录制并继续', 'Stop recording and go on'),
+                  style: const TextStyle(fontSize: 13)),
+            ),
+          ],
+        ),
+      );
+      if (action != 'stop') return false;
+      for (final u in gone) {
+        await _stopRecording(u, notify: false);
+      }
+      if (mounted) {
+        _showTip(L10n.t('已停止 ${gone.length} 路录制，文件已保存',
+            'Stopped {n} recording(s), files saved', {'n': gone.length}));
+      }
+      return true;
+    } finally {
+      _confirmBusy = false;
+    }
+  }
+
+  /// 会销毁播放器的设置变更：先过确认，再执行
+  VoidCallback _guardedApply(Set<String> nextDesired, VoidCallback apply) {
+    return () {
+      unawaited(() async {
+        if (!await _confirmDestroy(nextDesired)) return;
+        if (!mounted) return;
+        apply();
+      }());
+    };
   }
 
   /// 同步池与当前页：创建缺失的、释放不再显示的（切换期间跳过，避免频繁重建崩溃）
@@ -975,6 +1187,11 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       }
       c.play();
       setState(() {});
+      // 断线重连后自动接着录（新的一段文件），不让网络抖动把录制丢掉
+      final resume = _resumeRec.remove(url);
+      if (resume != null && _pool[url] == c && !_recordings.containsKey(url)) {
+        unawaited(_resumeRecording(url, c, resume));
+      }
       // 首帧兜底：open 成功后 5 秒内既无首帧也无错误（流不兼容/卡死），提示并重连
       _retryTimers[url]?.cancel();
       _retryTimers[url] = Timer(Duration(seconds: _firstFrameTimeout), () {
@@ -994,7 +1211,20 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     });
   }
 
-  void _destroy(String url) {
+  void _destroy(String url, {bool preserveRecording = false}) {
+    final rec = _recordings[url];
+    if (rec != null) {
+      if (preserveRecording) {
+        // 断线重连：当前段先收尾存盘，重连成功后自动接着录下一段
+        _resumeRec[url] = (name: rec.name, part: rec.part + 1, fmt: rec.fmt);
+        unawaited(_stopRecording(url, notify: false));
+      } else {
+        // 画面被切走/关闭：先把录制停掉并保存，再销毁播放器
+        unawaited(_stopRecording(url, notify: false).then((_) {
+          if (mounted) _showTip(L10n.t('该路画面已切换，录制已停止并保存'));
+        }));
+      }
+    }
     _retryTimers[url]?.cancel();
     _retryTimers.remove(url);
     _retryPending.remove(url);
@@ -1033,8 +1263,8 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
       _retryPending.remove(url);
       _retryTimers.remove(url);
       if (!mounted) return;
-      // 重建该路播放器
-      _destroy(url);
+      // 重建该路播放器（重连，不打断录制）
+      _destroy(url, preserveRecording: true);
       _create(url);
       setState(() {});
     });
@@ -1107,11 +1337,23 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
     // 连续两次返回才退出
     final now = DateTime.now();
     if (_lastBackTs != null && now.difference(_lastBackTs!).inSeconds < 2) {
-      SystemNavigator.pop();
+      _lastBackTs = null;
+      await _exitApp();
       return;
     }
     _lastBackTs = now;
     _showTip(L10n.t('再按一次返回键退出'));
+  }
+
+  /// 退出软件：有录制时先确认（取消 = 不退出、录制继续）
+  Future<void> _exitApp() async {
+    if (!mounted) return;
+    if (!await _confirmDestroy(const <String>{})) {
+      _lastBackTs = null;
+      if (mounted) _showTip(L10n.t('已取消退出，录制继续', 'Exit cancelled, recording continues'));
+      return;
+    }
+    SystemNavigator.pop();
   }
 
   @override
@@ -1374,7 +1616,9 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             // 选中框只在 TV 模式显示；手机/平板触摸操作不需要
             focused: _tvEffective && i == _gridFocusIndex,
             isSwitching: _isSwitching,
+            recording: _isRecordingUrl(ch.url),
             onTap: () => _openFullscreen(ch),
+            onMenu: (pos) => _showCellMenu(ch, pos),
           );
         },
       ),
@@ -1446,6 +1690,19 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             channel: channel,
             controller: c,
             status: _statusOf(channel.url),
+            onSnapshot: () => _captureScreenshot(channel),
+            recording: _isRecordingUrl(channel.url),
+            onToggleRecord: () async {
+              if (_isRecordingUrl(channel.url)) {
+                await _stopRecording(channel.url, notify: false);
+                return false;
+              }
+              await _startRecording(channel);
+              return _isRecordingUrl(channel.url);
+            },
+            onStopRecord: () =>
+                _stopRecording(channel.url, notify: false),
+            onRegisterExit: (fn) => _exitFullscreenRequest = fn,
             onClosed: () {
               c?.setVolume(0);
               _applyOrientationLock();
@@ -1455,7 +1712,298 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
         .then((_) {
       // 返回后保持原画面继续播放（同一 controller，无需重连）
       _fullscreenChannel = null;
+      _exitFullscreenRequest = null;
+      // 退出全屏后如果该路仍在录制（用户选了"继续录制"），提示仍在录
+      if (_isRecordingUrl(channel.url) && mounted) {
+        setState(() {});
+        _showTip(L10n.t('该画面仍在后台录制，可在网格菜单中停止'));
+      }
     });
+  }
+
+  /// 由全屏页注册：ESC / 右键统一走它的退出确认流程
+  Future<void> Function()? _exitFullscreenRequest;
+
+  /// 截取一路画面存成 PNG（设置里可指定桌面端保存目录）。
+  /// 返回 path（成功）或 error 错误码（no_frame / PERMISSION_DENIED / SAVE_FAILED）
+  Future<({String? path, String? error})> _captureScreenshot(
+      Channel channel) async {
+    final c = _pool[channel.url];
+    if (c == null || !c.value.hasFrame) return (path: null, error: 'no_frame');
+    try {
+      final png = await c.snapshotPng();
+      if (png == null) return (path: null, error: 'no_frame');
+      final path = await CaptureStore.saveScreenshot(png, channel.name,
+          customDir: _captureDir);
+      return (path: path, error: null);
+    } on PlatformException catch (e) {
+      return (path: null, error: e.code);
+    } catch (_) {
+      return (path: null, error: 'SAVE_FAILED');
+    }
+  }
+
+  /// 截图失败提示文案（按错误码给出可操作的说明）
+  String _captureErrorText(String? code) => captureErrorText(code);
+
+  /// 网格右键（桌面）/ 长按（手机）菜单
+  Future<void> _showCellMenu(Channel channel, Offset globalPos) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final size = overlay?.size ?? MediaQuery.of(context).size;
+    final pos = RelativeRect.fromLTRB(
+      globalPos.dx,
+      globalPos.dy,
+      max(0, size.width - globalPos.dx),
+      max(0, size.height - globalPos.dy),
+    );
+    final recording = _recordings.containsKey(channel.url);
+    final sel = await showMenu<String>(
+      context: context,
+      position: pos,
+      color: const Color(0xFF1E1E1E),
+      items: [
+        PopupMenuItem<String>(
+          value: 'full',
+          height: 38,
+          child: Text(L10n.t('全屏'), style: const TextStyle(fontSize: 13)),
+        ),
+        PopupMenuItem<String>(
+          value: 'shot',
+          height: 38,
+          child: Text(L10n.t('截图'), style: const TextStyle(fontSize: 13)),
+        ),
+        PopupMenuItem<String>(
+          value: recording ? 'rec_stop' : 'rec_start',
+          height: 38,
+          child: Row(
+            children: [
+              Icon(
+                recording ? Icons.stop_circle_outlined : Icons.fiber_manual_record,
+                size: 15,
+                color: recording ? Colors.white70 : Colors.redAccent,
+              ),
+              const SizedBox(width: 6),
+              Text(recording ? L10n.t('停止录制') : L10n.t('开始录制'),
+                  style: const TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (!mounted || sel == null) return;
+    switch (sel) {
+      case 'full':
+        _openFullscreen(channel);
+      case 'shot':
+        final r = await _captureScreenshot(channel);
+        if (!mounted) return;
+        _showTip(r.path != null
+            ? L10n.t('截图已保存：${r.path}', 'Screenshot saved: {path}',
+                {'path': r.path})
+            : _captureErrorText(r.error));
+      case 'rec_start':
+        await _startRecording(channel);
+      case 'rec_stop':
+        await _stopRecording(channel.url);
+    }
+  }
+
+  // ---------- 录制（单路：MDK 流复制，不重新解码） ----------
+
+  bool _isRecordingUrl(String url) => _recordings.containsKey(url);
+
+  /// 按画面实际编码决定封装格式（"自动"模式），不区分平台：
+  /// H.265(HEVC)：MDK 在 Windows 和 Android 上都写不进 TS/MP4，只有一帧的废文件，一律用 MKV。
+  /// H.264：一律用 TS（监控设备/NVR 通用，断流也能播）。
+  String _resolveRecFormat(NativePlayerController c) {
+    if (_recFormat != 'auto') return _recFormat;
+    final codec = c.videoCodec.toLowerCase();
+    final hevc = codec.contains('hevc') ||
+        codec.contains('h265') ||
+        codec.contains('h.265') ||
+        codec.contains('265') ||
+        codec.contains('hev1') ||
+        codec.contains('hvc1');
+    return hevc ? 'mkv' : 'ts';
+  }
+
+  Future<void> _startRecording(Channel channel) async {
+    if (_recordings.containsKey(channel.url)) return;
+    final c = _pool[channel.url];
+    if (c == null || !c.value.isInitialized) {
+      _showTip(L10n.t('该画面还没加载好，暂时不能录制'));
+      return;
+    }
+    try {
+      final fmt = _resolveRecFormat(c);
+      final path = await CaptureStore.recordingPath(channel.name, _captureDir,
+          part: 0, format: fmt);
+      final ok = c.startRecord(path, format: fmt);
+      if (!ok) {
+        _showTip(L10n.t('录制启动失败，请稍后重试'));
+        return;
+      }
+      final rec = _Recording(
+        url: channel.url,
+        name: channel.name,
+        controller: c,
+        part: 0,
+        path: path,
+        fmt: fmt,
+        startedAt: DateTime.now(),
+      );
+      _recordings[channel.url] = rec;
+      _scheduleSegment(rec);
+      _scheduleCheck(rec);
+      if (mounted) setState(() {});
+      _showTip(L10n.t('已开始录制', 'Recording started'));
+    } on PlatformException catch (e) {
+      _showTip(e.code == 'PERMISSION_DENIED'
+          ? L10n.t('需要存储权限才能保存录制文件，请在系统设置里允许本软件使用存储')
+          : L10n.t('录制启动失败，请检查保存目录'));
+    } catch (_) {
+      _showTip(L10n.t('录制启动失败，请检查保存目录'));
+    }
+  }
+
+  /// 断线重连后接着录制：新播放器 + 新一段文件（part 递增），不弹"已开始录制"
+  Future<void> _resumeRecording(String url, NativePlayerController c,
+      ({String name, int part, String fmt}) r) async {
+    try {
+      final path = await CaptureStore.recordingPath(r.name, _captureDir,
+          part: r.part, format: r.fmt);
+      if (!mounted ||
+          _pool[url] != c ||
+          _recordings.containsKey(url) ||
+          !c.value.isInitialized) {
+        return;
+      }
+      if (!c.startRecord(path, format: r.fmt)) return;
+      final rec = _Recording(
+        url: url,
+        name: r.name,
+        controller: c,
+        part: r.part,
+        path: path,
+        fmt: r.fmt,
+        startedAt: DateTime.now(),
+      );
+      _recordings[url] = rec;
+      _scheduleSegment(rec);
+      _scheduleCheck(rec);
+      if (mounted) setState(() {});
+      _showTip(L10n.t('画面已重连，录制自动继续（新的一段文件）',
+          'Reconnected; recording resumed in a new segment'));
+    } catch (_) {
+      // 续录失败：保持已保存的前一段，不再打扰用户
+    }
+  }
+
+  /// 某些源（如 HEVC 编码的 FLV/RTSP）在部分平台下 MDK 无法写入 TS / MP4：
+  /// 只有容器头 + 一两帧（约 20KB），后续写入失败。
+  /// 启动 3 秒后检查文件大小，若几乎没增长就自动改用 MKV 重新录，保证不丢内容。
+  void _scheduleCheck(_Recording rec) {
+    rec.checkTimer?.cancel();
+    if (rec.fmt == 'mkv') return; // MKV 已是最稳格式，不再检测
+    rec.checkTimer = Timer(const Duration(seconds: 3), () async {
+      if (!rec.active || rec.fmt == 'mkv') return;
+      final f = File(rec.path);
+      final s1 = await f.exists() ? await f.length() : 0;
+      await Future.delayed(const Duration(seconds: 2));
+      if (!rec.active || rec.fmt == 'mkv') return;
+      final s2 = await f.exists() ? await f.length() : 0;
+      // 正常流 2 秒至少涨几 KB；若几乎不涨，说明 muxer 写入失败（只有容器头）
+      if (s2 - s1 < 1024) await _fallbackToMkv(rec);
+    });
+  }
+
+  Future<void> _fallbackToMkv(_Recording rec) async {
+    final badPath = rec.path;
+    try {
+      rec.controller.stopRecord();
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 200));
+    String next;
+    try {
+      next = await CaptureStore.recordingPath(rec.name, _captureDir,
+          part: rec.part, format: 'mkv');
+    } catch (_) {
+      return;
+    }
+    if (!rec.controller.startRecord(next, format: 'mkv')) {
+      return;
+    }
+    rec.path = next;
+    rec.fmt = 'mkv';
+    try {
+      if (await File(badPath).exists()) await File(badPath).delete();
+    } catch (_) {}
+    _scheduleCheck(rec);
+    if (mounted) setState(() {});
+    _showTip(L10n.t(
+        '当前画面无法用 TS/MP4 封装（该流编码不支持），已自动改用 MKV，画质无损',
+        'This stream cannot be muxed into TS/MP4; switched to MKV (lossless)'));
+  }
+
+  /// 30 分钟（可配置）到点切下一段；录制不中断播放
+  void _scheduleSegment(_Recording rec) {
+    rec.timer?.cancel();
+    if (_recSegmentMin <= 0) return;
+    rec.timer = Timer(Duration(minutes: _recSegmentMin), () {
+      _rotateSegment(rec);
+    });
+  }
+
+  Future<void> _rotateSegment(_Recording rec) async {
+    if (!rec.active || rec.controller.value.hasError) return;
+    final prevPath = rec.path;
+    try {
+      rec.controller.stopRecord();
+      final next = await CaptureStore.recordingPath(rec.name, _captureDir,
+          part: rec.part + 1, format: rec.fmt);
+      if (!rec.controller.startRecord(next, format: rec.fmt)) {
+        _recordings.remove(rec.url);
+        rec.active = false;
+        if (mounted) setState(() {});
+        _showTip(L10n.t('分段录制中断（画面可能已断开）'));
+        return;
+      }
+      rec.part += 1;
+      rec.path = next;
+      rec.startedAt = DateTime.now();
+      _scheduleSegment(rec);
+      if (rec.fmt != 'mkv') _scheduleCheck(rec);
+      _publishQuietly(prevPath, rec.part - 1, rec.fmt);
+    } catch (_) {
+      // 切换失败：保持原状，下一段再试
+    }
+  }
+
+  /// 停止录制并把文件落到最终位置（Android：私有 → 公共下载目录）
+  Future<void> _stopRecording(String url, {bool notify = true}) async {
+    final rec = _recordings.remove(url);
+    if (rec == null) return;
+    rec.active = false;
+    rec.timer?.cancel();
+    rec.checkTimer?.cancel();
+    rec.controller.stopRecord();
+    if (mounted) setState(() {});
+    final path = await _publishQuietly(rec.path, rec.part, rec.fmt);
+    if (!notify) return;
+    _showTip(path != null
+        ? L10n.t('录制已保存：$path', 'Recording saved: {path}', {'path': path})
+        : L10n.t('录制已停止，但保存到下载目录失败'));
+  }
+
+  /// 把一段录制文件发布到最终位置；返回可展示路径，失败返回 null
+  Future<String?> _publishQuietly(String path, int part, [String? fmt]) async {
+    final name = path.split(Platform.pathSeparator).last;
+    try {
+      return await CaptureStore.publishRecording(path, name, fmt ?? 'ts');
+    } catch (_) {
+      return null;
+    }
   }
 
   // ---------- 面板容器 ----------
@@ -1492,6 +2040,12 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             onStyle: _setPanelStyle,
             onTvMode: _setTvMode,
             onLang: _setLang,
+            captureDir: _captureDir,
+            onCaptureDir: _setCaptureDir,
+            recFormat: _recFormat,
+            onRecFormat: _setRecFormat,
+            recSegment: _recSegmentMin,
+            onRecSegment: _setRecSegment,
             tvOverride: _tvOverride,
             onImport: _importM3U,
             videoDecoder: _videoDecoder,
@@ -1558,6 +2112,12 @@ class _MonitorHomePageState extends State<MonitorHomePage> {
             onStyle: _setPanelStyle,
             onTvMode: _setTvMode,
             onLang: _setLang,
+            captureDir: _captureDir,
+            onCaptureDir: _setCaptureDir,
+            recFormat: _recFormat,
+            onRecFormat: _setRecFormat,
+            recSegment: _recSegmentMin,
+            onRecSegment: _setRecSegment,
             tvOverride: _tvOverride,
             onImport: _importM3U,
             videoDecoder: _videoDecoder,
@@ -1794,15 +2354,146 @@ Widget _helpSection(String title, List<String> lines) {
   );
 }
 
-/// 关于弹窗：版本信息 + 组件架构构成 + 作者
+/// 关于弹窗：版本信息 + 项目主页 + 组件架构构成 + 检查更新
 Future<void> showAppAboutDialog(BuildContext context) {
   return showDialog(
     context: context,
-    builder: (ctx) => AlertDialog(
+    builder: (_) => const _AboutDialog(),
+  );
+}
+
+/// 项目主页
+const String kProjectUrl = 'https://github.com/gtyphoon/m3u_player_fvp';
+
+/// 发布页（下载新版本）
+const String kReleasesUrl = '$kProjectUrl/releases';
+
+class _AboutDialog extends StatefulWidget {
+  const _AboutDialog();
+
+  @override
+  State<_AboutDialog> createState() => _AboutDialogState();
+}
+
+class _AboutDialogState extends State<_AboutDialog> {
+  bool _checking = false;
+  bool _failed = false;
+  String? _latest; // 发现的新版本号（非空才显示"前往下载"）
+  String? _result; // 检查结果文案
+
+  Future<void> _openLink(String url) async {
+    final ok = await NativeIO.openUrl(url);
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(L10n.t('打不开浏览器，请手动访问：$url',
+            'Could not open a browser. Please visit: {url}', {'url': url})),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  /// 版本号比较：4.0.6 vs 4.1.0 → -1 / 0 / 1（缺的段按 0 处理）
+  static int _compareVersion(String a, String b) {
+    List<int> parts(String s) => s
+        .split(RegExp(r'[.+\-]'))
+        .map((x) => int.tryParse(x) ?? 0)
+        .toList();
+    final pa = parts(a);
+    final pb = parts(b);
+    final n = max(pa.length, pb.length);
+    for (var i = 0; i < n; i++) {
+      final va = i < pa.length ? pa[i] : 0;
+      final vb = i < pb.length ? pb[i] : 0;
+      if (va != vb) return va > vb ? 1 : -1;
+    }
+    return 0;
+  }
+
+  /// 从 GitHub 取最新 tag：先看 releases/latest，没有发布页就退回 tags 列表
+  Future<String?> _fetchLatestTag() async {
+    const targets = [
+      'https://api.github.com/repos/gtyphoon/m3u_player_fvp/releases/latest',
+      'https://api.github.com/repos/gtyphoon/m3u_player_fvp/tags',
+    ];
+    for (final u in targets) {
+      HttpClient? client;
+      try {
+        client = HttpClient()
+          ..connectionTimeout = const Duration(seconds: 6);
+        final req = await client.getUrl(Uri.parse(u));
+        req.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
+        req.headers.set(
+            HttpHeaders.userAgentHeader, 'm3u-player-fvp-update-check');
+        final resp = await req.close().timeout(const Duration(seconds: 10));
+        if (resp.statusCode != 200) {
+          client.close(force: true);
+          continue;
+        }
+        final body = await resp.transform(utf8.decoder).join();
+        client.close(force: true);
+        final data = jsonDecode(body);
+        if (data is Map && data['tag_name'] is String) {
+          return data['tag_name'] as String;
+        }
+        if (data is List) {
+          final tags = data
+              .whereType<Map>()
+              .map((m) => m['name'])
+              .whereType<String>()
+              .toList();
+          if (tags.isEmpty) continue;
+          tags.sort(_compareVersion);
+          return tags.last;
+        }
+      } catch (_) {
+        client?.close(force: true);
+      }
+    }
+    return null;
+  }
+
+  Future<void> _checkUpdate() async {
+    if (_checking) return;
+    setState(() {
+      _checking = true;
+      _failed = false;
+      _result = null;
+      _latest = null;
+    });
+    final tag = await _fetchLatestTag();
+    if (!mounted) return;
+    if (tag == null) {
+      setState(() {
+        _checking = false;
+        _failed = true;
+        _result = L10n.t('检查失败：网络不可用或 GitHub 访问被拦截，请稍后再试',
+            'Check failed: no network, or GitHub is blocked. Try again later.');
+      });
+      return;
+    }
+    final latest = tag.replaceAll(RegExp('^[vV]'), '').trim();
+    final newer = _compareVersion(latest, kAppVersion) > 0;
+    setState(() {
+      _checking = false;
+      _latest = newer ? latest : null;
+      _result = newer
+          ? L10n.t('发现新版本 $latest（当前 $kAppVersion），可点"前往下载"',
+              'New version {new} available (current {cur}). Tap "Download".',
+              {'new': latest, 'cur': kAppVersion})
+          : L10n.t('已是最新版本（$kAppVersion）',
+              'You are on the latest version ({cur}).', {'cur': kAppVersion});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
       backgroundColor: Colors.blueGrey.shade900,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       title: Text(L10n.t('关于'),
-          style: TextStyle(color: Colors.white, fontSize: 16)),
+          style: const TextStyle(color: Colors.white, fontSize: 16)),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1812,9 +2503,34 @@ Future<void> showAppAboutDialog(BuildContext context) {
             _aboutRow(L10n.t('版本'), '$kAppVersion（build $kAppBuild）'),
             _aboutRow(L10n.t('作者'), kAppAuthor),
             _aboutRow(L10n.t('许可'), kAppLicense),
+            // 项目主页：可点击，点了用系统浏览器打开
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${L10n.t('项目主页')}：',
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 13)),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => _openLink(kProjectUrl),
+                      child: Text(
+                        kProjectUrl,
+                        style: const TextStyle(
+                          color: Colors.lightBlueAccent,
+                          fontSize: 13,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 10),
             Text(L10n.t('组件架构构成'),
-                style: TextStyle(
+                style: const TextStyle(
                     color: Colors.lightBlueAccent,
                     fontSize: 14,
                     fontWeight: FontWeight.bold)),
@@ -1825,6 +2541,7 @@ Future<void> showAppAboutDialog(BuildContext context) {
               L10n.t('FFmpeg（HEVC-in-FLV / H.264 硬解与软解）'),
               L10n.t('平台：Android（arm64-v8a / armeabi-v7a / x86_64）'),
               L10n.t('平台：Windows（x64 桌面版）'),
+              L10n.t('平台：Linux（x64 桌面版，Ubuntu / Debian / 麒麟 / Deepin 等）'),
             ])
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),
@@ -1832,18 +2549,75 @@ Future<void> showAppAboutDialog(BuildContext context) {
                     style:
                         const TextStyle(color: Colors.white70, fontSize: 13)),
               ),
+            const SizedBox(height: 12),
+            // 检查更新（联网查 GitHub 最新 tag）
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _checking ? null : _checkUpdate,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.lightBlueAccent,
+                    side: const BorderSide(color: Colors.lightBlueAccent),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  icon: _checking
+                      ? const SizedBox(
+                          width: 13,
+                          height: 13,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.lightBlueAccent),
+                        )
+                      : const Icon(Icons.system_update_alt, size: 15),
+                  label: Text(
+                      _checking
+                          ? L10n.t('检查中…', 'Checking...')
+                          : L10n.t('检查更新', 'Check for updates'),
+                      style: const TextStyle(fontSize: 13)),
+                ),
+                if (_latest != null) ...[
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => _openLink(kReleasesUrl),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.lightBlueAccent,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(L10n.t('前往下载', 'Download'),
+                        style: const TextStyle(fontSize: 13)),
+                  ),
+                ],
+              ],
+            ),
+            if (_result != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  _result!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _failed
+                        ? Colors.orangeAccent
+                        : (_latest != null
+                            ? Colors.lightBlueAccent
+                            : Colors.white70),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(ctx).pop(),
+          onPressed: () => Navigator.of(context).pop(),
           child: Text(L10n.t('知道了'),
-              style: TextStyle(color: Colors.lightBlueAccent, fontSize: 15)),
+              style: const TextStyle(
+                  color: Colors.lightBlueAccent, fontSize: 15)),
         ),
       ],
-    ),
-  );
+    );
+  }
 }
 
 Widget _aboutRow(String key, String value) {
@@ -1985,6 +2759,14 @@ class _PanelBody extends StatefulWidget {
   final String? tvOverride;
   final ValueChanged<String> onTvMode;
   final ValueChanged<String> onLang;
+  // 高级设置：截图/录制保存目录（null=程序所在目录）
+  final String? captureDir;
+  final ValueChanged<String?> onCaptureDir;
+  // 高级设置：录制参数
+  final String recFormat; // ts / mkv / mp4
+  final ValueChanged<String> onRecFormat;
+  final int recSegment; // 分段时长（分钟），0=不分段
+  final ValueChanged<int> onRecSegment;
   final ValueChanged<int> onPage;
   final ValueChanged<PanelStyle> onStyle;
   final VoidCallback onImport;
@@ -2034,6 +2816,12 @@ class _PanelBody extends StatefulWidget {
     required this.tvOverride,
     required this.onTvMode,
     required this.onLang,
+    required this.captureDir,
+    required this.onCaptureDir,
+    required this.recFormat,
+    required this.onRecFormat,
+    required this.recSegment,
+    required this.onRecSegment,
     required this.onPage,
     required this.onStyle,
     required this.onImport,
@@ -2235,18 +3023,7 @@ class _PanelBodyState extends State<_PanelBody> {
                 ),
                 const SizedBox(height: 10),
                 const Divider(color: Colors.white24),
-                _label(L10n.t('界面语言')),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 8,
-                  children: [
-                    _btn(L10n.t('跟随系统'), L10n.langKey() == 'system', () => widget.onLang('system')),
-                    _btn('中文', L10n.langKey() == 'zh', () => widget.onLang('zh')),
-                    _btn('English', L10n.langKey() == 'en', () => widget.onLang('en')),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                const Divider(color: Colors.white24),
+                // 界面语言已移到"高级设置"页，与截图/录制设置统一收纳
                 _label(L10n.t('播放器参数（调完翻页生效，自动保存）')),
                 _label(L10n.t('解码方式')),
                 Wrap(
@@ -2338,6 +3115,10 @@ class _PanelBodyState extends State<_PanelBody> {
                 ),
                 const SizedBox(height: 10),
                 Center(
+                  child: _btn(L10n.t('高级设置'), false, _openAdvanced),
+                ),
+                const SizedBox(height: 10),
+                Center(
                   child: _btn(L10n.t('操作说明'), false,
                       () => showHelpDialog(context)),
                 ),
@@ -2355,6 +3136,23 @@ class _PanelBodyState extends State<_PanelBody> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 高级设置页：界面语言 + 截图/录制保存位置 + 录制参数
+  Future<void> _openAdvanced() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _AdvancedSheet(
+        captureDir: widget.captureDir,
+        onCaptureDir: widget.onCaptureDir,
+        langKey: L10n.langKey(),
+        onLang: widget.onLang,
+        recFormat: widget.recFormat,
+        onRecFormat: widget.onRecFormat,
+        recSegment: widget.recSegment,
+        onRecSegment: widget.onRecSegment,
+      ),
     );
   }
 
@@ -2446,7 +3244,11 @@ class _MonitorCell extends StatefulWidget {
   final bool muted;
   final bool focused;
   final bool isSwitching;
+  /// 该路是否正在录制（左上角显示红点）
+  final bool recording;
   final VoidCallback onTap;
+  /// 右键（桌面）/ 长按（手机）呼出菜单，传入按下的全局坐标
+  final void Function(Offset globalPos)? onMenu;
 
   const _MonitorCell({
     super.key,
@@ -2456,7 +3258,9 @@ class _MonitorCell extends StatefulWidget {
     required this.muted,
     required this.focused,
     required this.isSwitching,
+    required this.recording,
     required this.onTap,
+    this.onMenu,
   });
 
   @override
@@ -2474,6 +3278,9 @@ class _MonitorCellState extends State<_MonitorCell> {
     final focused = widget.focused;
     return GestureDetector(
       onDoubleTap: widget.onTap, // 双击进入全屏（单击不响应，避免误触）
+      // 右键（Windows/Linux 鼠标）/ 长按（Android）呼出操作菜单
+      onSecondaryTapDown: (d) => widget.onMenu?.call(d.globalPosition),
+      onLongPressStart: (d) => widget.onMenu?.call(d.globalPosition),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.black,
@@ -2511,20 +3318,67 @@ class _MonitorCellState extends State<_MonitorCell> {
                         ],
                       ),
                     ),
-                  // 频道名
+                  // 频道名 + 录制标记（同一行，放在底部信息区）
+                  // 不能放左上角：顶部信息条是 87% 不透明黑渐变，菜单按钮正好压在
+                  // 第一格左上角；而录制前刚点过鼠标、信息条正在显示，REC 就被盖得看不见了
                   Positioned(
                     left: 5,
                     bottom: 4,
                     right: 5,
-                    child: Text(
-                      widget.channel.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-                      ),
+                    child: Row(
+                      children: [
+                        if (widget.recording) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(3),
+                              border: Border.all(
+                                  color: Colors.redAccent, width: 0.8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 5,
+                                  height: 5,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.redAccent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 3),
+                                const Text(
+                                  'REC',
+                                  style: TextStyle(
+                                    color: Colors.redAccent,
+                                    fontSize: 9,
+                                    height: 1.15,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                        ],
+                        Flexible(
+                          child: Text(
+                            widget.channel.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              shadows: [
+                                Shadow(color: Colors.black, blurRadius: 4)
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -2540,12 +3394,27 @@ class _FullscreenPage extends StatefulWidget {
   final NativePlayerController? controller;
   final String status;
   final VoidCallback onClosed;
+  /// 截图：返回 path（成功）或 error 错误码（失败）
+  final Future<({String? path, String? error})> Function()? onSnapshot;
+  /// 当前是否在录制（进入全屏时的状态）
+  final bool recording;
+  /// 切换录制状态，返回切换后的状态
+  final Future<bool> Function()? onToggleRecord;
+  /// 停止录制（退出确认里"停止录制并退出"用）
+  final Future<void> Function()? onStopRecord;
+  /// 注册"请求退出全屏"入口，供主页 ESC / 右键统一走确认流程
+  final void Function(Future<void> Function()?)? onRegisterExit;
 
   const _FullscreenPage({
     required this.channel,
     required this.controller,
     required this.status,
     required this.onClosed,
+    this.onSnapshot,
+    this.recording = false,
+    this.onToggleRecord,
+    this.onStopRecord,
+    this.onRegisterExit,
   });
 
   @override
@@ -2555,6 +3424,7 @@ class _FullscreenPage extends StatefulWidget {
 class _FullscreenPageState extends State<_FullscreenPage> {
   final TransformationController _tc = TransformationController();
   String? _lock; // null=当前方向，双击切横屏/竖屏
+  late bool _rec = widget.recording;
 
   @override
   @override
@@ -2562,9 +3432,12 @@ class _FullscreenPageState extends State<_FullscreenPage> {
     super.initState();
     // 全屏时隐藏状态栏和导航栏
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    widget.onRegisterExit?.call(_requestExit);
   }
 
+  @override
   void dispose() {
+    widget.onRegisterExit?.call(null);
     _tc.dispose();
     // 退出全屏时恢复状态栏和导航栏
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -2593,19 +3466,68 @@ class _FullscreenPageState extends State<_FullscreenPage> {
     if (mounted) setState(() {});
   }
 
+  /// 角落截图按钮：点了才截，平时几乎不可见（低透明度小圆钮）
+  Future<void> _onSnapshotTap() async {
+    final fn = widget.onSnapshot;
+    if (fn == null) return;
+    final r = await fn();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(r.path != null
+            ? L10n.t('截图已保存：${r.path}', 'Screenshot saved: {path}',
+                {'path': r.path})
+            : captureErrorText(r.error)),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  /// 角落录制按钮：开始/停止本路录制
+  Future<void> _onRecordTap() async {
+    final fn = widget.onToggleRecord;
+    if (fn == null) return;
+    final now = await fn();
+    if (!mounted) return;
+    setState(() => _rec = now);
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(now
+            ? L10n.t('已开始录制', 'Recording started')
+            : L10n.t('录制已停止并保存', 'Recording stopped and saved')),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  /// 退出全屏统一入口：只回到网格，画面继续播放、录制继续。
+  /// 录制真正的停止时机是"这路通道被销毁之前"，由主页 _confirmDestroy 统一确认，
+  /// 所以退出全屏不再打扰用户。
+  Future<void> _requestExit() async {
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final safeTop = MediaQuery.of(context).padding.top;
     final c = widget.controller;
     // 出首帧才算有画面；open 成功但无帧时显示加载提示
     final showFrame = c != null && c.value.hasFrame;
-    return Scaffold(
+    return PopScope(
+      canPop: true, // 退出全屏只回网格，录制在后台继续；停止录制的确认在"通道销毁前"
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _requestExit();
+      },
+      child: Scaffold(
       backgroundColor: Colors.black,
       body: Listener(
         // Windows：鼠标右键退出全屏返回网格（Android 触摸无右键，不受影响）
         onPointerDown: (e) {
           if ((e.buttons & kSecondaryMouseButton) != 0) {
-            Navigator.of(context).pop();
+            _requestExit();
           }
         },
         child: GestureDetector(
@@ -2645,12 +3567,90 @@ class _FullscreenPageState extends State<_FullscreenPage> {
                 ),
               ),
             // 全屏模式不显示标题和提示，保持纯净画面
+            // 仅在右上角放一个低调的截图按钮（半透明、小尺寸）
+            if (widget.onSnapshot != null)
+              Positioned(
+                right: 10,
+                top: 10 + safeTop,
+                child: Opacity(
+                  opacity: 0.38,
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _onSnapshotTap,
+                      child: Padding(
+                        padding: const EdgeInsets.all(7),
+                        child: Icon(Icons.camera_alt_outlined,
+                            size: 17,
+                            color: Colors.white70,
+                            semanticLabel: L10n.t('截图')),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // 录制按钮：放在截图按钮左侧，同样低调；录制中变红色
+            if (widget.onToggleRecord != null)
+              Positioned(
+                right: 10 + 31 + 8,
+                top: 10 + safeTop,
+                child: Opacity(
+                  opacity: _rec ? 0.85 : 0.38,
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _onRecordTap,
+                      child: Padding(
+                        padding: const EdgeInsets.all(7),
+                        child: Icon(
+                          _rec
+                              ? Icons.stop_circle_outlined
+                              : Icons.fiber_manual_record,
+                          size: 17,
+                          color: _rec ? Colors.redAccent : Colors.white70,
+                          semanticLabel:
+                              _rec ? L10n.t('停止录制') : L10n.t('开始录制'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
       ),
+      ),
     );
   }
+}
+
+/// 单路录制状态：一路一个，随页面销毁时停止并保存
+class _Recording {
+  _Recording({
+    required this.url,
+    required this.name,
+    required this.controller,
+    required this.part,
+    required this.path,
+    required this.fmt,
+    required this.startedAt,
+  });
+
+  final String url;
+  final String name;
+  final NativePlayerController controller;
+  int part; // 分段序号（0 为第一段）
+  String path; // 当前分段文件路径
+  String fmt; // 当前段实际使用的封装格式（可能因自检降级从 ts 变成 mkv）
+  DateTime startedAt;
+  Timer? timer;
+  Timer? checkTimer;
+  bool active = true;
 }
 
 /// 应用内文件列表选择框（电视遥控友好：方向键移动高亮、OK 选择）
@@ -2759,6 +3759,297 @@ class _TvFileDialogState extends State<_TvFileDialog> {
               style: TextStyle(color: Colors.lightBlueAccent, fontSize: 14)),
         ),
       ],
+    );
+  }
+}
+
+/// 高级设置页（控制面板内弹出）：界面语言 + 截图/录制保存位置
+///
+/// 语言与截图/录制设置集中放在这里，主面板保持精简。
+class _AdvancedSheet extends StatefulWidget {
+  final String? captureDir;
+  final ValueChanged<String?> onCaptureDir;
+  final String langKey;
+  final ValueChanged<String> onLang;
+  final String recFormat;
+  final ValueChanged<String> onRecFormat;
+  final int recSegment;
+  final ValueChanged<int> onRecSegment;
+
+  const _AdvancedSheet({
+    required this.captureDir,
+    required this.onCaptureDir,
+    required this.langKey,
+    required this.onLang,
+    required this.recFormat,
+    required this.onRecFormat,
+    required this.recSegment,
+    required this.onRecSegment,
+  });
+
+  @override
+  State<_AdvancedSheet> createState() => _AdvancedSheetState();
+}
+
+class _AdvancedSheetState extends State<_AdvancedSheet> {
+  late String _lang;
+  late String? _dir;
+  late String _recFormat;
+  late int _recSegment;
+  String? _appDir;
+
+  @override
+  void initState() {
+    super.initState();
+    _lang = widget.langKey;
+    _dir = widget.captureDir;
+    _recFormat = widget.recFormat;
+    _recSegment = widget.recSegment;
+    NativeIO.getAppDir().then((d) {
+      if (mounted) setState(() => _appDir = d);
+    });
+  }
+
+  Widget _sec(String text) => Padding(
+        padding: const EdgeInsets.only(top: 4, bottom: 8),
+        child: Text(text,
+            style: const TextStyle(
+                fontSize: 13,
+                color: Colors.white70,
+                fontWeight: FontWeight.w600)),
+      );
+
+  Widget _hint(String text) => Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(text,
+            style: const TextStyle(fontSize: 11, color: Colors.white38)),
+      );
+
+  Widget _pill(String label, bool selected, VoidCallback onTap) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? Colors.lightBlueAccent.withValues(alpha: .35)
+                : Colors.white10,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(label,
+              style: const TextStyle(color: Colors.white, fontSize: 13)),
+        ),
+      );
+
+  void _setLang(String key) {
+    _lang = key;
+    widget.onLang(key);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickDir() async {
+    final d = await NativeIO.pickDirectory();
+    if (d == null || d.trim().isEmpty) return;
+    _dir = d.trim();
+    widget.onCaptureDir(_dir);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openDir() async {
+    final base = _dir ?? _appDir;
+    if (base == null) return;
+    await NativeIO.openDirectory('$base${Platform.pathSeparator}screenshots');
+  }
+
+  Future<void> _openRecDir() async {
+    final base = _dir ?? _appDir;
+    if (base == null) return;
+    await NativeIO.openDirectory('$base${Platform.pathSeparator}recordings');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxH = MediaQuery.of(context).size.height * 0.75;
+    final baseText = _dir ?? _appDir ?? '…';
+    return Dialog(
+      backgroundColor: Colors.blueGrey.shade900,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 460, maxHeight: maxH),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 8, 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.tune, size: 18, color: Colors.lightBlueAccent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(L10n.t('高级设置'),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, size: 18, color: Colors.white54),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white24),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _sec(L10n.t('界面语言')),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 8,
+                      children: [
+                        _pill(L10n.t('跟随系统'), _lang == 'system',
+                            () => _setLang('system')),
+                        _pill('中文', _lang == 'zh', () => _setLang('zh')),
+                        _pill('English', _lang == 'en', () => _setLang('en')),
+                      ],
+                    ),
+                    _hint(L10n.t('默认跟随系统语言，切换后立即生效并自动保存')),
+
+                    const SizedBox(height: 18),
+                    const Divider(color: Colors.white24),
+                    _sec(L10n.t('截图与录制')),
+                    Text(L10n.t('截图保存位置'),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.white54)),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      kIsDesktop
+                          ? '$baseText${Platform.pathSeparator}screenshots'
+                          : '${L10n.t('下载')}/M3U播放器/screenshots',
+                      style: const TextStyle(fontSize: 12, color: Colors.white),
+                    ),
+                    if (kIsDesktop) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 8,
+                        children: [
+                          _pill(L10n.t('更改目录'), false, _pickDir),
+                          _pill(L10n.t('恢复默认'), _dir == null, () {
+                            _dir = null;
+                            widget.onCaptureDir(null);
+                            if (mounted) setState(() {});
+                          }),
+                          _pill(L10n.t('打开文件夹'), false, _openDir),
+                        ],
+                      ),
+                      _hint(L10n.t('默认保存在软件所在目录，留空即使用默认')),
+                    ] else
+                      _hint(L10n.t('Android 上直接保存到"下载/M3U播放器"，可在文件管理器查看')),
+
+                    const SizedBox(height: 16),
+                    Text(L10n.t('录制保存位置'),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.white54)),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      kIsDesktop
+                          ? '$baseText${Platform.pathSeparator}recordings'
+                          : '${L10n.t('下载')}/M3U播放器/recordings',
+                      style: const TextStyle(fontSize: 12, color: Colors.white),
+                    ),
+                    if (kIsDesktop) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 8,
+                        children: [
+                          _pill(L10n.t('打开录制文件夹'), false, _openRecDir),
+                        ],
+                      ),
+                    ],
+                    _hint(L10n.t('录制文件与截图放在同一个根目录下，分 screenshots / recordings 两个子目录')),
+
+                    const SizedBox(height: 16),
+                    Text(L10n.t('录制封装格式'),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.white54)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 8,
+                      children: [
+                        _pill(L10n.t('自动', 'Auto'), _recFormat == 'auto', () {
+                          _recFormat = 'auto';
+                          widget.onRecFormat('auto');
+                          if (mounted) setState(() {});
+                        }),
+                        _pill('TS', _recFormat == 'ts', () {
+                          _recFormat = 'ts';
+                          widget.onRecFormat('ts');
+                          if (mounted) setState(() {});
+                        }),
+                        _pill('MKV', _recFormat == 'mkv', () {
+                          _recFormat = 'mkv';
+                          widget.onRecFormat('mkv');
+                          if (mounted) setState(() {});
+                        }),
+                        _pill('MP4', _recFormat == 'mp4', () {
+                          _recFormat = 'mp4';
+                          widget.onRecFormat('mp4');
+                          if (mounted) setState(() {});
+                        }),
+                      ],
+                    ),
+                    _hint(L10n.t(
+                        '自动（推荐）：H.264 一律用 TS（监控设备/NVR 通用，断流也能播）；H.265 一律用 MKV——Windows 和 Android 都写不进 TS/MP4',
+                        'Auto (recommended): H.264 → TS everywhere (NVR friendly); H.265 → MKV always (TS/MP4 fail on Windows and Android)')),
+                    _hint(L10n.t('手动选 TS/MP4 遇到不支持的流时，几秒内会自动改用 MKV 并提示，画质不受影响')),
+
+                    const SizedBox(height: 16),
+                    Text(L10n.t('分段时长'),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.white54)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 8,
+                      children: [
+                        for (final m in const [15, 30, 60])
+                          _pill(L10n.t('$m 分钟', '$m min'),
+                              _recSegment == m, () {
+                            _recSegment = m;
+                            widget.onRecSegment(m);
+                            if (mounted) setState(() {});
+                          }),
+                        _pill(L10n.t('不分段', 'No split'), _recSegment == 0, () {
+                          _recSegment = 0;
+                          widget.onRecSegment(0);
+                          if (mounted) setState(() {});
+                        }),
+                      ],
+                    ),
+                    _hint(L10n.t('到点自动换新文件，单段过大会影响播放和拷贝；默认 30 分钟')),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white24),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _pill(L10n.t('完成'), true,
+                    () => Navigator.of(context).pop()),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

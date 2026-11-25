@@ -1,6 +1,8 @@
 ﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/widgets.dart';
 import 'package:fvp/mdk.dart' as mdk;
 import 'package:fvp/fvp.dart' as fvp_reg;
@@ -189,6 +191,98 @@ class NativePlayerController {
   void setVolume(double v) {
     _volume = v;
     _player?.volume = v;
+  }
+
+  /// 截取当前画面一帧，编码成 PNG 字节。无画面 / 出错返回 null。
+  ///
+  /// 走 MDK 的 snapshot（直接取解码后的 RGBA 帧，不受窗口遮挡或缩放影响），
+  /// [maxWidth] > 0 且原始宽度更大时按比例缩到该宽度，0 表示原始分辨率。
+  Future<Uint8List?> snapshotPng({int maxWidth = 1920}) async {
+    final p = _player;
+    if (p == null || _disposed) return null;
+    try {
+      ui.Size? size;
+      size = await p.textureSize.timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => null,
+      );
+      final srcW = size?.width.round() ?? 0;
+      final srcH = size?.height.round() ?? 0;
+      if (srcW <= 0 || srcH <= 0) return null;
+
+      var outW = srcW;
+      var outH = srcH;
+      if (maxWidth > 0 && srcW > maxWidth) {
+        outW = maxWidth;
+        outH = (srcH * maxWidth / srcW).round();
+      }
+      final data = await p.snapshot(
+        width: outW == srcW ? null : outW,
+        height: outH == srcH ? null : outH,
+      );
+      if (data == null || data.length < outW * outH * 4) return null;
+
+      final image = await _rgbaToImage(data, outW, outH);
+      if (image == null) return null;
+      final png = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      return png?.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<ui.Image?> _rgbaToImage(Uint8List rgba, int w, int h) {
+    final c = Completer<ui.Image?>();
+    ui.decodeImageFromPixels(
+      rgba,
+      w,
+      h,
+      ui.PixelFormat.rgba8888,
+      (img) => c.complete(img),
+    );
+    return c.future.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () => null,
+    );
+  }
+
+  /// 当前视频编码名（如 hevc / h264）；画面未就绪时返回空串。
+  /// 录制时用来决定封装格式：H.265 在部分平台写不进 TS/MP4。
+  String get videoCodec {
+    final v = _player?.mediaInfo.video;
+    if (v == null || v.isEmpty) return '';
+    return v.first.codec.codec.toString();
+  }
+
+  /// 开始把当前正在播的流录制到 [path]（MDK 流复制，不重新解码，
+  /// 画质与原流一致、CPU 占用极低）。返回 false 表示播放器未就绪。
+  /// [format] 指定封装格式，默认 ts（对 HEVC / 直播流兼容性最好）。
+  bool startRecord(String path, {String format = 'ts'}) {
+    final p = _player;
+    if (p == null || _disposed) return false;
+    try {
+      // MDK 的 format 参数是 ffmpeg muxer 名，不是文件后缀：
+      // ts -> mpegts，mkv -> matroska，mp4 -> mp4
+      final fmt = switch (format) {
+        'ts' => 'mpegts',
+        'mkv' => 'matroska',
+        _ => 'mp4',
+      };
+      p.record(to: path, format: fmt);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 停止录制（MDK 会 flush 并关闭文件）
+  void stopRecord() {
+    final p = _player;
+    if (p == null) return;
+    try {
+      p.record(); // to = null 即停止
+    } catch (_) {}
   }
 
   void dispose() {
