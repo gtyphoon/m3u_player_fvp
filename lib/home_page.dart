@@ -18,8 +18,8 @@ const List<int> kLayouts = [1, 2, 4, 5, 6, 7, 8, 16];
 
 // ---------- 应用信息（关于弹窗展示，需与 pubspec.yaml 保持一致） ----------
 const String kAppName = 'M3U播放器';
-const String kAppVersion = '4.0.4';
-const String kAppBuild = '16';
+const String kAppVersion = '4.0.5';
+const String kAppBuild = '17';
 const String kAppAuthor = 'gtyphoon';
 const String kAppLicense = 'MIT License';
 
@@ -2905,56 +2905,69 @@ class _MonitorCellState extends State<_MonitorCell> {
                         ],
                       ),
                     ),
-                  // 频道名
+                  // 频道名 + 录制标记（同一行，放在底部信息区）
+                  // 不能放左上角：顶部信息条是 87% 不透明黑渐变，菜单按钮正好压在
+                  // 第一格左上角；而录制前刚点过鼠标、信息条正在显示，REC 就被盖得看不见了
                   Positioned(
                     left: 5,
                     bottom: 4,
                     right: 5,
-                    child: Text(
-                      widget.channel.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-                      ),
+                    child: Row(
+                      children: [
+                        if (widget.recording) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(3),
+                              border: Border.all(
+                                  color: Colors.redAccent, width: 0.8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 5,
+                                  height: 5,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.redAccent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 3),
+                                const Text(
+                                  'REC',
+                                  style: TextStyle(
+                                    color: Colors.redAccent,
+                                    fontSize: 9,
+                                    height: 1.15,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                        ],
+                        Flexible(
+                          child: Text(
+                            widget.channel.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              shadows: [
+                                Shadow(color: Colors.black, blurRadius: 4)
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  // 录制中标记：左上角闪烁红点 + REC
-                  if (widget.recording)
-                    Positioned(
-                      left: 6,
-                      top: 5,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: const BoxDecoration(
-                              color: Colors.redAccent,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(color: Colors.black54, blurRadius: 3),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          const Text(
-                            'REC',
-                            style: TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              shadows: [
-                                Shadow(color: Colors.black, blurRadius: 3),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                 ],
               ),
             ),
